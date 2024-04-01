@@ -59,7 +59,7 @@ func main() {
 					numDirs := cCtx.Int("numDirs")
 					linesPerFile := cCtx.Int("linesPerFile")
 					linksPerFile := cCtx.Int("linksPerFile")
-					fmt.Println("Creating files...")
+					fmt.Printf("Creating %v files with %v lines and %v links each...\n", numFiles, linesPerFile, linksPerFile)
 					tStart := time.Now()
 					_, err := createFiles(dir, numFiles, numDirs, linesPerFile, linksPerFile)
 					timeElapsed := time.Since(tStart)

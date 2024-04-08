@@ -77,7 +77,7 @@ func TestParseLinksInLine(t *testing.T) {
 	}
 
 	for i, c := range cases {
-		links, err := ParseLinksInLine(c.Line, c.LineIndex)
+		links, err := ParseLinksInLine([]byte(c.Line), c.LineIndex)
 		if c.ReturnsError {
 			assert.NotNil(err, "test case %v", i)
 		} else {

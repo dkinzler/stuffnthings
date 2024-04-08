@@ -1,5 +1,11 @@
 package main
 
+import (
+	"bufio"
+	"io"
+	"os"
+)
+
 type File struct {
 	AbsPath       string
 	Path          string
@@ -29,7 +35,11 @@ func ParseFiles(paths []string, rootPath string) (map[string]*File, error) {
 	}
 
 	for _, f := range files {
-		outgoingLinks, err := ParseLinksInFile(f.AbsPath)
+		file, err := os.Open(f.AbsPath)
+		if err != nil {
+			return nil, err
+		}
+		outgoingLinks, err := ParseLinks(file)
 		if err != nil {
 			return nil, err
 		}
@@ -48,16 +58,13 @@ func ParseFiles(paths []string, rootPath string) (map[string]*File, error) {
 	return files, nil
 }
 
-func ParseLinksInFile(path string) ([]Link, error) {
-	scanner, err := NewFileScanner(path)
-	if err != nil {
-		return nil, err
-	}
+func ParseLinks(r io.Reader) ([]Link, error) {
+	scanner := bufio.NewScanner(r)
 
 	var links []Link
 	lineIndex := 0
 	for scanner.Scan() {
-		line := scanner.Text()
+		line := scanner.Bytes()
 		lineLinks, err := ParseLinksInLine(line, lineIndex)
 		if err != nil {
 			return nil, err
@@ -71,7 +78,7 @@ func ParseLinksInFile(path string) ([]Link, error) {
 	return links, nil
 }
 
-func ParseLinksInLine(line string, lineIndex int) ([]Link, error) {
+func ParseLinksInLine(line []byte, lineIndex int) ([]Link, error) {
 	var links []Link
 	i := 0
 	for i+1 < len(line) {
@@ -94,7 +101,7 @@ func ParseLinksInLine(line string, lineIndex int) ([]Link, error) {
 				inner := line[start+2 : end-1]
 				uStart, uEnd := ToUTF16Range(line, start, end)
 				links = append(links, Link{
-					Path: inner,
+					Path: string(inner),
 					Range: Range{
 						Start: Position{
 							Line:      uint(lineIndex),

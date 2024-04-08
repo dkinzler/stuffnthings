@@ -54,7 +54,7 @@ func TestUTF16RangeConversion(t *testing.T) {
 	}
 
 	for i, c := range cases {
-		start, end := ToUTF16Range(c.S, c.Start, c.End)
+		start, end := ToUTF16Range([]byte(c.S), c.Start, c.End)
 		assert.Equal(c.OutStart, start, "test case %v", i)
 		assert.Equal(c.OutEnd, end, "test case %v", i)
 	}

@@ -173,7 +173,7 @@ func (s *Server) GotoDefinition(params DefinitionParams) (Location, error) {
 		}
 	}
 
-	line, err := ReadLine(path, int(params.Position.Line))
+	line, err := ReadLineFromFile(path, int(params.Position.Line))
 	if err != nil {
 		return Location{}, ResponseError{
 			Code:    InternalError,
@@ -181,7 +181,7 @@ func (s *Server) GotoDefinition(params DefinitionParams) (Location, error) {
 		}
 	}
 
-	links, err := ParseLinksInLine(string(line), 0)
+	links, err := ParseLinksInLine(line, 0)
 	if err != nil {
 		return Location{}, ResponseError{
 			Code:    InternalError,

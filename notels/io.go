@@ -3,11 +3,13 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
 	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // Returns the path of a URI.
@@ -44,20 +46,17 @@ func RelToAbsPath(prefix, path string) string {
 	return filepath.Join(prefix, path)
 }
 
-func NewFileScanner(filePath string) (*bufio.Scanner, error) {
-	r, err := os.Open(filePath)
+func ReadLineFromFile(path string, index int) ([]byte, error) {
+	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	return bufio.NewScanner(r), nil
+	return ReadLine(file, index)
 }
 
 // Reads and returns a specific line from a file.
-func ReadLine(filePath string, index int) ([]byte, error) {
-	scanner, err := NewFileScanner(filePath)
-	if err != nil {
-		return nil, err
-	}
+func ReadLine(r io.Reader, index int) ([]byte, error) {
+	scanner := bufio.NewScanner(r)
 
 	var line []byte
 	li := 0
@@ -95,8 +94,26 @@ func ListFiles(path string) ([]string, error) {
 
 // Converts a utf-8 range of code units (bytes) to the equivalent utf-16 range of code units (2 bytes each).
 // TODO this could probably be done more efficiently?
-func ToUTF16Range(s string, start, end int) (int, int) {
-	a := utf16.Encode([]rune(s[0:start]))
-	b := utf16.Encode([]rune(s[start : end+1]))
-	return len(a), len(a) + len(b) - 1
+func ToUTF16Range(s []byte, start, end int) (int, int) {
+	// a := utf16.Encode([]rune(s[0:start]))
+	// b := utf16.Encode([]rune(s[start : end+1]))
+	// return len(a), len(a) + len(b) - 1
+	a := countUTF16Units(s[0:start])
+	b := countUTF16Units(s[start : end+1])
+	return a, a + b - 1
+}
+
+func countUTF16Units(s []byte) int {
+	result := 0
+	for len(s) > 0 {
+		r, size := utf8.DecodeRune(s)
+		a, b := utf16.EncodeRune(r)
+		if a == b && a == 0xfffd {
+			result += 1
+		} else {
+			result += 2
+		}
+		s = s[size:]
+	}
+	return result
 }

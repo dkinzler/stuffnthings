@@ -48,6 +48,7 @@ func RelToAbsPath(prefix, path string) string {
 
 func ReadLineFromFile(path string, index int) ([]byte, error) {
 	file, err := os.Open(path)
+	defer file.Close()
 	if err != nil {
 		return nil, err
 	}

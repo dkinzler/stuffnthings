@@ -53,6 +53,7 @@ func ParseFiles(paths []string, rootPath string) (map[string]*File, error) {
 				g.IncomingLinks = append(g.IncomingLinks, nl)
 			}
 		}
+		file.Close()
 	}
 
 	return files, nil

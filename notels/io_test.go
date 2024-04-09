@@ -16,41 +16,20 @@ func TestUTF16RangeConversion(t *testing.T) {
 		OutStart int
 		OutEnd   int
 	}{
-		{
-			S:        "abcdefg",
-			Start:    0,
-			End:      4,
-			OutStart: 0,
-			OutEnd:   4,
-		},
-		{
-			S:        "abcdefg",
-			Start:    2,
-			End:      4,
-			OutStart: 2,
-			OutEnd:   4,
-		},
-		{
-			S:        "ä",
-			Start:    0,
-			End:      1,
-			OutStart: 0,
-			OutEnd:   0,
-		},
-		{
-			S:        "ää",
-			Start:    0,
-			End:      3,
-			OutStart: 0,
-			OutEnd:   1,
-		},
-		{
-			S:        "ääabc",
-			Start:    4,
-			End:      6,
-			OutStart: 2,
-			OutEnd:   4,
-		},
+		{"abcdefg", 0, 4, 0, 4},
+		{"abcdefg", 2, 4, 2, 4},
+		{"ä", 0, 1, 0, 0},
+		{"ää", 0, 3, 0, 1},
+		{"ääabc", 4, 6, 2, 4},
+		// Multi-byte UTF-8, but single code unit UTF-16
+		{"こんにちは", 0, 2, 0, 0},
+		{"こんにちは", 3, 5, 1, 1},
+		// Multi-byte UTF-8, multi code unit UTF-16
+		{"\U0001F050\U0001F065\U0001F08D", 0, 3, 0, 1},
+		{"🁐🁥🂍", 0, 3, 0, 1},
+		{"🁐🁥🂍", 4, 7, 2, 3},
+		{"🁐🁥🂍", 4, 11, 2, 5},
+		{"🁐🁥a🂍", 4, 12, 2, 6},
 	}
 
 	for i, c := range cases {

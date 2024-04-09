@@ -92,12 +92,9 @@ func ListFiles(path string) ([]string, error) {
 	return files, nil
 }
 
-// Converts a utf-8 range of code units (bytes) to the equivalent utf-16 range of code units (2 bytes each).
 // TODO this could probably be done more efficiently?
+// Converts a utf-8 range of code units (bytes) to the equivalent utf-16 range of code units (2 bytes each).
 func ToUTF16Range(s []byte, start, end int) (int, int) {
-	// a := utf16.Encode([]rune(s[0:start]))
-	// b := utf16.Encode([]rune(s[start : end+1]))
-	// return len(a), len(a) + len(b) - 1
 	a := countUTF16Units(s[0:start])
 	b := countUTF16Units(s[start : end+1])
 	return a, a + b - 1

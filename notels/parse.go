@@ -65,10 +65,7 @@ func ParseLinks(r io.Reader) ([]Link, error) {
 	lineIndex := 0
 	for scanner.Scan() {
 		line := scanner.Bytes()
-		lineLinks, err := ParseLinksInLine(line, lineIndex)
-		if err != nil {
-			return nil, err
-		}
+		lineLinks := ParseLinksInLine(line, lineIndex)
 		links = append(links, lineLinks...)
 		lineIndex += 1
 	}
@@ -78,7 +75,7 @@ func ParseLinks(r io.Reader) ([]Link, error) {
 	return links, nil
 }
 
-func ParseLinksInLine(line []byte, lineIndex int) ([]Link, error) {
+func ParseLinksInLine(line []byte, lineIndex int) []Link {
 	var links []Link
 	i := 0
 	for i+1 < len(line) {
@@ -120,7 +117,7 @@ func ParseLinksInLine(line []byte, lineIndex int) ([]Link, error) {
 			i += 1
 		}
 	}
-	return links, nil
+	return links
 }
 
 func FindLinkByCharacterOffset(links []Link, offset uint) (Link, bool) {

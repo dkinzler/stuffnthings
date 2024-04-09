@@ -13,13 +13,27 @@ func TestParseLinksInLine(t *testing.T) {
 		Line          string
 		LineIndex     int
 		ExpectedLinks []Link
-		ReturnsError  bool
 	}{
 		{
 			Line:          "",
 			LineIndex:     0,
 			ExpectedLinks: nil,
-			ReturnsError:  false,
+		},
+		{
+			Line:          "[[]",
+			LineIndex:     0,
+			ExpectedLinks: nil,
+		},
+		// skip empty links
+		{
+			Line:          "[[]]",
+			LineIndex:     0,
+			ExpectedLinks: nil,
+		},
+		{
+			Line:          "[[abc",
+			LineIndex:     0,
+			ExpectedLinks: nil,
 		},
 		{
 			Line:      "[[abc/def.hij]]",
@@ -39,7 +53,6 @@ func TestParseLinksInLine(t *testing.T) {
 					},
 				},
 			},
-			ReturnsError: false,
 		},
 		{
 			Line:      "[[abc/def.hij]] [[x.y]]",
@@ -72,17 +85,11 @@ func TestParseLinksInLine(t *testing.T) {
 					},
 				},
 			},
-			ReturnsError: false,
 		},
 	}
 
 	for i, c := range cases {
-		links, err := ParseLinksInLine([]byte(c.Line), c.LineIndex)
-		if c.ReturnsError {
-			assert.NotNil(err, "test case %v", i)
-		} else {
-			assert.Nil(err, "test case %v", i)
-			assert.Equal(c.ExpectedLinks, links, "test case %v", i)
-		}
+		links := ParseLinksInLine([]byte(c.Line), c.LineIndex)
+		assert.Equal(c.ExpectedLinks, links, "test case %v", i)
 	}
 }

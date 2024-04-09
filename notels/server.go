@@ -181,13 +181,7 @@ func (s *Server) GotoDefinition(params DefinitionParams) (Location, error) {
 		}
 	}
 
-	links, err := ParseLinksInLine(line, 0)
-	if err != nil {
-		return Location{}, ResponseError{
-			Code:    InternalError,
-			Message: "could not parse link",
-		}
-	}
+	links := ParseLinksInLine(line, 0)
 
 	link, ok := FindLinkByCharacterOffset(links, params.Position.Character)
 	if !ok {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -33,7 +34,9 @@ type Repo struct {
 type Model struct {
 	state State
 
-	authenticationError error
+	authenticationStatus string
+	authenticationError  error
+	loginError           error
 
 	repos             []Repo
 	loadingReposError error
@@ -44,24 +47,26 @@ type Model struct {
 
 	cloneResult map[string]bool
 
-	onExit tea.Cmd
+	backupDir string
 }
 
-func NewModel(onExit tea.Cmd) Model {
+func NewModel(backupRoot string) Model {
 	return Model{
-		state:               Authenticating,
-		authenticationError: nil,
-		repos:               nil,
-		loadingReposError:   nil,
-		reposList:           nil,
-		reposToClone:        nil,
-		cloneResult:         map[string]bool{},
-		onExit:              onExit,
+		state:                Authenticating,
+		authenticationStatus: "",
+		authenticationError:  nil,
+		loginError:           nil,
+		repos:                nil,
+		loadingReposError:    nil,
+		reposList:            nil,
+		reposToClone:         nil,
+		cloneResult:          map[string]bool{},
+		backupDir:            filepath.Join(backupRoot, "github"),
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	return authenticate()
+	return checkAuthentication()
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -74,11 +79,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case authenticationResult:
 			if msg.err == nil {
 				m.state = Authenticated
+				m.authenticationStatus = msg.status
 				m.authenticationError = nil
 			} else {
 				m.state = AuthenticationError
+				m.authenticationStatus = ""
 				m.authenticationError = msg.err
 			}
+		case loginResult:
+			m.loginError = msg.err
+			cmd = checkAuthentication()
 		}
 
 	case AuthenticationError:
@@ -88,7 +98,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if key == "enter" {
 				m.state = Authenticating
 				m.authenticationError = nil
-				cmd = authenticate()
+				cmd = login()
 			}
 		}
 
@@ -101,9 +111,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.repos = nil
 				m.loadingReposError = nil
 				cmd = loadRepos()
+			case "l":
+				m.state = Authenticating
+				m.authenticationStatus = ""
+				m.authenticationError = nil
+				m.loginError = nil
+				cmd = login()
 			}
-			// TODO else if key == "l" here call login command to use another account?
-			// and after that we need to check authentication again
 		}
 
 	case LoadingRepos:
@@ -143,7 +157,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = CloningRepos
 				var cmds []tea.Cmd
 				for _, r := range m.reposToClone {
-					cmds = append(cmds, cloneRepo(r))
+					cmds = append(cmds, cloneRepo(r, m.backupDir))
 				}
 				cmd = tea.Batch(cmds...)
 			default:
@@ -156,9 +170,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg := msg.(type) {
 		case cloneRepoResult:
 			if msg.err == nil {
-				m.cloneResult[msg.repo.Id] = true
+				m.cloneResult[msg.id] = true
 			} else {
-				m.cloneResult[msg.repo.Id] = false
+				m.cloneResult[msg.id] = false
 			}
 
 			if len(m.cloneResult) == len(m.reposToClone) {
@@ -176,32 +190,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 type authenticationResult struct {
+	status string
+	err    error
+}
+
+func checkAuthentication() tea.Cmd {
+	return func() tea.Msg {
+		c := exec.Command("gh", "auth", "status", "-h", "github.com")
+		out, err := c.CombinedOutput()
+		if err != nil {
+			return authenticationResult{err: fmt.Errorf("Not authenticated: %v", string(out))}
+		}
+		return authenticationResult{status: string(out), err: nil}
+	}
+}
+
+type loginResult struct {
 	err error
 }
 
-// TODO split this into separate functions, a function sthat checks if we are authenticated and if so
-// return the account and information about it
-// another functions for login?
-// or have both of these as commands and then we can define authenticate as a sequence command?
-// but that won't work because?
-// probably use functions and then define commands based on that?
-// authenticate() does checking and then login
-
-// TODO to check if we are logged in already can do
-// gh auth status -h github.com   -> will exit with code 1 if not logged in, 0 otherwise
-// could also use this to read the current authenticated username?
-func authenticate() tea.Cmd {
+func login() tea.Cmd {
 	return func() tea.Msg {
-		c := exec.Command("gh", "auth", "status", "-h", "github.com")
-		err := c.Run()
-		if err == nil {
-			return authenticationResult{err: nil}
-		}
-		// TODO could also run this manually
-		c = exec.Command("gh", "auth", "login")
+		c := exec.Command("gh", "auth", "login")
 		return tea.ExecProcess(c, func(err error) tea.Msg {
 			log.Println(err)
-			return authenticationResult{err: err}
+			return loginResult{err: err}
 		})()
 	}
 }
@@ -220,7 +233,7 @@ type loadReposResult struct {
 func loadRepos() tea.Cmd {
 	return func() tea.Msg {
 		// TODO add argument here to increase max num of results
-		cmd := exec.Command("gh", "repo", "list", "--json", "id,name,url")
+		cmd := exec.Command("gh", "repo", "list", "--json", "id,name,nameWithOwner,url")
 
 		out, err := cmd.Output()
 		if err != nil {
@@ -241,15 +254,16 @@ func loadRepos() tea.Cmd {
 }
 
 type cloneRepoResult struct {
-	repo Repo
-	err  error
+	id  string
+	err error
 }
 
-func cloneRepo(repo Repo) tea.Cmd {
+func cloneRepo(repo Repo, dir string) tea.Cmd {
 	return func() tea.Msg {
-		cmd := exec.Command("gh", "repo", "clone", repo.Url, fmt.Sprintf("backup/%v", repo.Name))
+		// run the command through sh, otherwise e.g. ~ in the path won't get expanded
+		cmd := exec.Command("sh", "-c", fmt.Sprintf("gh repo clone %s %s", repo.Url, filepath.Join(dir, repo.Name)))
 
 		err := cmd.Run()
-		return cloneRepoResult{repo: repo, err: err}
+		return cloneRepoResult{id: repo.Id, err: err}
 	}
 }

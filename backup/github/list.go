@@ -16,7 +16,7 @@ type List struct {
 	// and we have a simple method to get a list of the selected repos
 	// yesyes
 	repos     []Repo
-	reposList *list.Model
+	reposList list.Model
 	// TODO might want to use a pointer here? so we can e.g. reset selected items more easily
 	// otherwise assigning a new map to reposListDelegate.Selected might not have an effect on the
 	// copy passed to reposList
@@ -33,7 +33,7 @@ func NewList(repos []Repo) *List {
 	reposList := list.New(items, reposListDelegate, 0, 0)
 	return &List{
 		repos:             repos,
-		reposList:         &reposList,
+		reposList:         reposList,
 		reposListDelegate: &reposListDelegate,
 	}
 }
@@ -54,7 +54,11 @@ func (l *List) Update(msg tea.Msg) tea.Cmd {
 					l.reposListDelegate.Selected[repo.Id] = struct{}{}
 				}
 			}
+		default:
+			l.reposList, cmd = l.reposList.Update(msg)
 		}
+	default:
+		l.reposList, cmd = l.reposList.Update(msg)
 	}
 	return cmd
 }

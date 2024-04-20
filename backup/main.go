@@ -5,51 +5,43 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
 /*
-TODO what to do next?
-maybe we could split view building into a separate file, or just put view code at the end?
+TODO
 what should we change about functionality?
+* HUGE BUG
+    * dir handling, if we pass "~/.." it will create a new directory named "~" in the current one
+    * this is because the argument to commands are passed in "~", in the cli that handles the same
+    * how to fix?
+        * convert to absolute path somehow?
+        * replace ~ with $HOME? -> this would work, but there are probably other cases that are still buggy
+* how to do a help text
+* define style of main menu
+    * define global styles, that can be passed to others
+    * have a global "wrapper" style that we use in main model .view that adds a bit of padding/margin
+* split of main menu view code
 * github
-    * refactoring
-        * turn switch around to
-    * authentication
-        * have an Authentication screen where we show the currently authenticated user
-        * and maybe the other available ones
-        * and on this screen we can either continue or login with a new account, or switch accounts
-        * rename Authenticating state to CheckingAuthentication this will load the data from gh
-        * when we e.g. login we run the gh command and then move back to the checking authentcation state
-        * and eventually to the Authenticated state
-        * when we press continue in authenticated we move to loading repos
     * list repos
-        * maybe our own list for repos without list class?
-            * this will probably be even simpler than using the predefined one
-            * and it will have selection integrated directly
-            * ability to select/unselect all with a button, a?
-            * default nothing selected?
-        * but problem with that is that we won't have pagination and scrolling and co
-        * so maybe keep the list but customize it?
-        * can also customize the help text at the bottom so we can use the same style everywhere
-    * cloning
-        * in result just return the id, that is enough
-    * a header at the top always that shows the current step or progress like 1/4?
-* main screen
-    * can just quit, no confirmation needed
-    * ability to change directory for backup
-        * for submodules we don't really need this, just put it in a subfolder, e.g. "github" inside backup dir
-        * how do we implement that?
-        * maybe just a menu point that shows the current backup folder
-            * if we press enter we open a screen with a textfield where we can change and then return
-    * add a command to zip the backup folder up quickly
-        * for that command we will first enter zip file name
-    * to keep it simple whenever we enter a submodule we create that module new, i.e. we don't keep old one around
-    * rename onExit command to just exit, or return?
-* styling
+        * can customize the help text at the bottom so we can use the same style everywhere
+* backup dir config
+    * do some validation checks, e.g. don't allow empty directory
+* zip
+    * do some validation, e.g. empty file, or have a default backup.zip if it is empty
+* figure out how to do the bubbles/help thing at the bottom
+    * can have it consistently everywhere
+* error handling
+    * how to get back better errors from commands? we probably have to read out/err streams?
+* ui and styling
+    * to fix ui go screen by screen
     * have a simple style, we don't need a border?
     * have a heading in each screen, and some margin, padding
     * a consistent bottom
@@ -61,6 +53,9 @@ what should we change about functionality?
     * we could create a model and feed it articial events and see what commands and new state it returns?
     * i.e. just testing the state machine
 * rename module to backup instead of backuper?
+* optional
+    * a header at the top always that shows the current step or progress like 1/4?
+    * validate backup dir that it would be writable? don't really need this, keep this on the user
 */
 
 var docStyle = lipgloss.NewStyle().Margin(1, 2)
@@ -80,30 +75,53 @@ func main() {
 	}
 }
 
+type State int
+
+const (
+	MainMenu State = iota
+	BackupDir
+	Zip
+	Inner
+)
+
 type Model struct {
-	list  list.Model
+	state             State
+	confirmViewActive bool
+
+	list list.Model
+
 	inner tea.Model
+
+	backupDir string
+
+	backupDirTextInput      textinput.Model
+	backupDirTextInputValid bool
+
+	zipTextInput textinput.Model
+	zipError     error
 }
 
 func NewModel() Model {
 	items := []list.Item{
 		item("Github"),
+		item("Backup"),
+		item("Zip"),
 	}
 	list := list.New(items, list.NewDefaultDelegate(), 0, 0)
 	list.SetFilteringEnabled(false)
 
 	return Model{
-		list:  list,
-		inner: nil,
+		state:             MainMenu,
+		confirmViewActive: false,
+		list:              list,
+		inner:             nil,
+		backupDir:         defaultBackupDir(),
 	}
 }
 
-type returnMsg struct{}
-
-func returnCmd() tea.Cmd {
-	return func() tea.Msg {
-		return returnMsg{}
-	}
+func defaultBackupDir() string {
+	date := time.Now().Format(time.DateOnly)
+	return filepath.Join("~/backup", date)
 }
 
 func (m Model) Init() tea.Cmd {
@@ -111,62 +129,149 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-
+	// handle global messages
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		//TODO have to take care to not overlap keybinds with other views
 		case "ctrl+c", "q":
 			return m, tea.Quit
-			// TODO handle returning to main screen here
-		// case "esc":
-		// 	m.confirmClose = true
-		// case "y":
-		// 	if m.confirmClose {
-		// 		cmd = m.onExit
-		// 	}
-		// case "n":
-		// 	if m.confirmClose {
-		// 		m.confirmClose = false
-		// 	}
-		case "enter":
-			// TODO bug
-			// when we are filtering we want to be able to press enter to apply the filer
-			// how could we distinguish here if we are currently filtering
-			// maybe with list.FilterState there is filtering, unfiltered, filtered?
-			// or we can just disable filtering
-			if m.inner == nil {
-				_, ok := m.list.SelectedItem().(item)
-				if ok {
-					// TODO should we call init here on that model and return that command? probably?
-					m.inner = github.NewModel(returnCmd())
+		case "esc":
+			if !m.confirmViewActive && m.state != MainMenu {
+				m.confirmViewActive = true
+			}
+			return m, nil
+		case "y":
+			if m.confirmViewActive {
+				m.confirmViewActive = false
+				m.state = MainMenu
+				m.inner = nil
+				return m, nil
+			}
+		case "n":
+			if m.confirmViewActive {
+				m.confirmViewActive = false
+				return m, nil
+			}
+		}
+	case tea.WindowSizeMsg:
+		// TODO yes this is what we need, need to do this everywhere we have a list
+		h, v := docStyle.GetFrameSize()
+		m.list.SetSize(msg.Width-h, msg.Height-v)
+		// TODO forward these to inner?
+	}
+
+	var cmd tea.Cmd
+
+	switch m.state {
+
+	case MainMenu:
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "enter":
+				// TODO disable filtering on list
+				s := string(m.list.SelectedItem().(item))
+				switch s {
+				case "Github":
+					m.state = Inner
+					m.inner = github.NewModel(m.backupDir)
 					cmd = m.inner.Init()
+				case "Backup":
+					m.state = BackupDir
+					t := textinput.New()
+					t.Placeholder = m.backupDir
+					t.Focus()
+					t.CharLimit = 250
+					t.Width = 40
+					m.backupDirTextInput = t
+					m.backupDirTextInputValid = true
+				case "Zip":
+					m.state = Zip
+					t := textinput.New()
+					t.Focus()
+					t.CharLimit = 250
+					t.Width = 40
+					m.zipTextInput = t
 				}
 				return m, cmd
 			}
 		}
-	case tea.WindowSizeMsg:
-		h, v := docStyle.GetFrameSize()
-		m.list.SetSize(msg.Width-h, msg.Height-v)
-	case returnMsg:
-		m.inner = nil
-		return m, nil
-	}
-	if m.inner != nil {
-		m.inner, cmd = m.inner.Update(msg)
-	} else {
 		m.list, cmd = m.list.Update(msg)
+	case BackupDir:
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "enter":
+				// TODO check if valid
+				dir := m.backupDirTextInput.Value()
+				m.backupDir = dir
+				m.backupDirTextInput = textinput.Model{}
+				m.backupDirTextInputValid = true
+				m.state = MainMenu
+				return m, cmd
+			}
+		}
+		m.backupDirTextInput, cmd = m.backupDirTextInput.Update(msg)
+	case Zip:
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "enter":
+				file := m.zipTextInput.Value()
+				cmd = zip(m.backupDir, file)
+				return m, cmd
+			}
+		case zipResult:
+			if msg.err == nil {
+				m.zipError = nil
+				m.zipTextInput = textinput.Model{}
+				m.state = MainMenu
+				return m, cmd
+			} else {
+				m.zipError = msg.err
+			}
+		}
+		m.zipTextInput, cmd = m.zipTextInput.Update(msg)
+	case Inner:
+		m.inner, cmd = m.inner.Update(msg)
 	}
+
 	return m, cmd
 }
 
 func (m Model) View() string {
-	if m.inner != nil {
-		return m.inner.View()
-	} else {
-		return m.list.View()
+	if m.confirmViewActive {
+		return docStyle.Render("Do you really want to return to main screen?")
 	}
+	switch m.state {
+	case MainMenu:
+		return m.list.View()
+	case BackupDir:
+		return fmt.Sprintf(
+			"Enter new backup directory:\n\n%s\n\n%s\n",
+			m.backupDirTextInput.View(),
+			"(enter) to confirm",
+		)
+	case Zip:
+		if m.zipError == nil {
+			return fmt.Sprintf(
+				"Zip output file:\n\n%s\n\n%s\n",
+				m.zipTextInput.View(),
+				"(enter) to zip",
+			)
+		} else {
+			return fmt.Sprintf(
+				"Zip output file:\n\n%s\n\n%s\n\n %s: %v\n",
+				m.zipTextInput.View(),
+				"zip failed",
+				m.zipError,
+				"(enter) to try again",
+			)
+		}
+	case Inner:
+		return m.inner.View()
+	}
+	return ""
 }
 
 type item string
@@ -181,4 +286,17 @@ func (i item) Title() string {
 
 func (i item) Description() string {
 	return ""
+}
+
+type zipResult struct {
+	err error
+}
+
+func zip(dir string, file string) tea.Cmd {
+	return func() tea.Msg {
+		c := exec.Command("zip", "-r", file, dir)
+		return tea.ExecProcess(c, func(err error) tea.Msg {
+			return zipResult{err: err}
+		})()
+	}
 }

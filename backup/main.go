@@ -19,30 +19,74 @@ import (
 
 /*
 TODO
-* define style of main menu
-    * define global styles, that can be passed to others
-    * have a global "wrapper" style that we use in main model .view that adds a bit of padding/margin
-* split of main menu view code
-* github
-    * list repos
-        * can customize the help text at the bottom so we can use the same style everywhere
-* backup dir config
-    * do some validation checks, e.g. don't allow empty directory
-    * can we do validationin the textfield alredy?
-* zip
-    * do some validation, e.g. empty file, or have a default backup.zip if it is empty
-* figure out how to do the bubbles/help thing at the bottom
-    * can have it consistently everywhere
-* error handling
-    * how to get back better errors from commands? we probably have to read out/err streams?
-* ui and styling
-    * to fix ui go screen by screen
-    * have a simple style, we don't need a border?
-    * have a heading in each screen, and some margin, padding
-    * a consistent bottom
-    * there are also lipgloss place horizontal and placevertical methods that might be interesting?
-    * we probably want to use the terminal width/height or size changed events
-        * can then propogate this down to our other models to use correct sizes?
+* refactoring
+    * add confirm view to state -> ConfirmGoBack
+    * save current state, have a method to switch state, which sets last and current state
+    * when confirm view gets accepted can move back to last state
+    * do some renames so that it is clerar which variable is from which state
+        * rename list to mainMenuList
+        * rename keyMap to mainMenukeyMap and helpView to mainMenuHelpView
+        * move those up to mainMenuList
+    * backup
+        * create keymap keep it in Model with backup fields
+        * create helpmodel
+    * zip
+        * create keymap and help model
+        * make zipError a string, because we want to display a string
+            * so whatever we get from result we need to transform or we transform it already in zip function?
+    * create all the models when in NewModel()
+        * and then reset them when appropriate
+        * i.e. do this for backup and zip, for mainMenu we already do it
+    * mainMenu create custom item delegate to control rendering
+        * have a description for each
+        * for backup we want to show the currently selected dir
+        * we either have to set this is a var in the delegate and update it
+            * or we can somehow access the model?
+    * styling
+        * define Styles struct with different fields
+        * have a method defaultStyles() that returns a Styles instance
+        * save this in models and pass it to GithubModel
+        * what styles? keep it very simple
+            * ViewStyle for the content wrapper
+            * HelpStyle for help text everywhere
+            * ListItem Style
+            * SelectedListItem Style
+            * TitleStyle for headers
+                * can we make text a bit bigger or only e.g. bold?
+            * ErrorStyle in red?
+            * NormalTextStyle might be same as ListItemStyle?
+        * need to figure out how to set these everywhere
+            * for list we do it with the delegate?
+            * for help we need to pass it to help.Model -> but hthis already requires certain styles?
+    * refactor View()
+        * is lipgloss.PlaceHorizontal and PlaceVertical useful?
+        * can use fmt.Sprintf everywhere, as a sequence of rendering different things
+            * title, content, help, maybe an error
+        * apply ViewStyle globally at the end
+    * more styling
+        * figure out how to handle windowresizes
+            * for mainMenu
+                * we want to set the available height, we will now the necessary height
+                    * because we know how many lines the main menu list item delegate will use
+            * just make some useful defaults, don't try to handle every case, if someone tries to run this in a window with only 2 lines fuck em
+    * github refactor
+        * can we handle cloningRepos and reposCloned differently?
+            * just show a done text at the end if we are done but not a separate reposCloned state?
+            * just keep it like this
+        * do we need to group or rename any model fields?
+        * create keymaps and help models for the different screens
+            * need one for Authenticated and AuthenticationError
+            * need one for ListRepos, same thing as for mainMenu list = needs a conversion function
+        * update ListRepo screen
+            * add custom help view
+            * need to run the same functions as on main menu to remove title and co
+        * cloningrepos screen
+            * show all repos initially with a "?", need to make sure that we are consistent
+                * in the iteration order
+        * refactor view and styling
+            * can basically use same styles everywhere, don't need anything special
+    * error handling
+        * how to get back better errors from commands? we probably have to read out/err streams?
 * testing
     * think a bit about testing and how to do it
     * we could create a model and feed it articial events and see what commands and new state it returns?

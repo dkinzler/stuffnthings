@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -17,14 +19,6 @@ import (
 
 /*
 TODO
-what should we change about functionality?
-* HUGE BUG
-    * dir handling, if we pass "~/.." it will create a new directory named "~" in the current one
-    * this is because the argument to commands are passed in "~", in the cli that handles the same
-    * how to fix?
-        * convert to absolute path somehow?
-        * replace ~ with $HOME? -> this would work, but there are probably other cases that are still buggy
-* how to do a help text
 * define style of main menu
     * define global styles, that can be passed to others
     * have a global "wrapper" style that we use in main model .view that adds a bit of padding/margin
@@ -34,6 +28,7 @@ what should we change about functionality?
         * can customize the help text at the bottom so we can use the same style everywhere
 * backup dir config
     * do some validation checks, e.g. don't allow empty directory
+    * can we do validationin the textfield alredy?
 * zip
     * do some validation, e.g. empty file, or have a default backup.zip if it is empty
 * figure out how to do the bubbles/help thing at the bottom
@@ -94,14 +89,20 @@ type Model struct {
 
 	backupDir string
 
-	backupDirTextInput      textinput.Model
-	backupDirTextInputValid bool
+	backupDirTextInput    textinput.Model
+	backupDirInputInvalid bool
 
-	zipTextInput textinput.Model
-	zipError     error
+	zipTextInput    textinput.Model
+	zipInputInvalid bool
+	zipError        error
+
+	keyMap   mainMenuKeyMap
+	helpView help.Model
 }
 
 func NewModel() Model {
+	keyMap := defaultMainMenuKeyMap()
+
 	items := []list.Item{
 		item("Github"),
 		item("Backup"),
@@ -109,6 +110,12 @@ func NewModel() Model {
 	}
 	list := list.New(items, list.NewDefaultDelegate(), 0, 0)
 	list.SetFilteringEnabled(false)
+	list.SetShowHelp(false)
+	list.DisableQuitKeybindings()
+	list.SetShowStatusBar(false)
+	list.SetShowPagination(false)
+	list.SetShowTitle(false)
+	list.KeyMap = keyMap.listKeyMap()
 
 	return Model{
 		state:             MainMenu,
@@ -116,6 +123,8 @@ func NewModel() Model {
 		list:              list,
 		inner:             nil,
 		backupDir:         defaultBackupDir(),
+		keyMap:            keyMap,
+		helpView:          help.New(),
 	}
 }
 
@@ -155,8 +164,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.WindowSizeMsg:
 		// TODO yes this is what we need, need to do this everywhere we have a list
-		h, v := docStyle.GetFrameSize()
-		m.list.SetSize(msg.Width-h, msg.Height-v)
+		h, _ := docStyle.GetFrameSize()
+		// m.list.SetSize(msg.Width-h, msg.Height-v)
+		m.list.SetSize(msg.Width-h, 12)
 		// TODO forward these to inner?
 	}
 
@@ -184,7 +194,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					t.CharLimit = 250
 					t.Width = 40
 					m.backupDirTextInput = t
-					m.backupDirTextInputValid = true
+					m.backupDirInputInvalid = false
 				case "Zip":
 					m.state = Zip
 					t := textinput.New()
@@ -192,8 +202,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					t.CharLimit = 250
 					t.Width = 40
 					m.zipTextInput = t
+					m.zipInputInvalid = false
 				}
 				return m, cmd
+			case "?":
+				m.helpView.ShowAll = !m.helpView.ShowAll
 			}
 		}
 		m.list, cmd = m.list.Update(msg)
@@ -204,10 +217,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				// TODO check if valid
 				dir := m.backupDirTextInput.Value()
-				m.backupDir = dir
-				m.backupDirTextInput = textinput.Model{}
-				m.backupDirTextInputValid = true
-				m.state = MainMenu
+				if dir == "" {
+					m.backupDirInputInvalid = true
+				} else {
+					m.backupDir = dir
+					m.backupDirTextInput = textinput.Model{}
+					m.backupDirInputInvalid = false
+					m.state = MainMenu
+				}
 				return m, cmd
 			}
 		}
@@ -218,7 +235,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "enter":
 				file := m.zipTextInput.Value()
-				cmd = zip(m.backupDir, file)
+				if file == "" {
+					m.zipInputInvalid = true
+				} else {
+					m.zipInputInvalid = false
+					cmd = zip(m.backupDir, file)
+				}
 				return m, cmd
 			}
 		case zipResult:
@@ -245,14 +267,30 @@ func (m Model) View() string {
 	}
 	switch m.state {
 	case MainMenu:
-		return m.list.View()
+		return docStyle.Render(fmt.Sprintf("%s\n\n%s\n\n", m.list.View(), m.helpView.View(m.keyMap)))
 	case BackupDir:
+		if m.backupDirInputInvalid {
+			return fmt.Sprintf(
+				"Enter new backup directory:\n\n%s\n\n%s\n\n%s\n",
+				m.backupDirTextInput.View(),
+				"Invalid directory.",
+				"(enter) to confirm",
+			)
+		}
 		return fmt.Sprintf(
 			"Enter new backup directory:\n\n%s\n\n%s\n",
 			m.backupDirTextInput.View(),
 			"(enter) to confirm",
 		)
 	case Zip:
+		if m.zipInputInvalid {
+			return fmt.Sprintf(
+				"Zip output file:\n\n%s\n\n%s\n\n%s\n",
+				m.zipTextInput.View(),
+				"Invalid input.",
+				"(enter) to zip",
+			)
+		}
 		if m.zipError == nil {
 			return fmt.Sprintf(
 				"Zip output file:\n\n%s\n\n%s\n",
@@ -294,9 +332,80 @@ type zipResult struct {
 
 func zip(dir string, file string) tea.Cmd {
 	return func() tea.Msg {
-		c := exec.Command("zip", "-r", file, dir)
+		c := exec.Command("sh", "-c", fmt.Sprintf("zip -r %s %s", file, dir))
 		return tea.ExecProcess(c, func(err error) tea.Msg {
 			return zipResult{err: err}
 		})()
+	}
+}
+
+type mainMenuKeyMap struct {
+	CursorUp      key.Binding
+	CursorDown    key.Binding
+	ShowFullHelp  key.Binding
+	CloseFullHelp key.Binding
+	Select        key.Binding
+	Exit          key.Binding
+}
+
+func defaultMainMenuKeyMap() mainMenuKeyMap {
+	return mainMenuKeyMap{
+		CursorUp: key.NewBinding(
+			key.WithKeys("k"),
+			key.WithHelp("k", "up"),
+		),
+		CursorDown: key.NewBinding(
+			key.WithKeys("j"),
+			key.WithHelp("j", "down"),
+		),
+		ShowFullHelp: key.NewBinding(
+			key.WithKeys("?"),
+			key.WithHelp("?", "more"),
+		),
+		CloseFullHelp: key.NewBinding(
+			key.WithKeys("?"),
+			key.WithHelp("?", "less"),
+		),
+		Select: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "select"),
+		),
+		Exit: key.NewBinding(
+			key.WithKeys("q"),
+			key.WithHelp("q", "quit"),
+		),
+	}
+}
+
+func (m mainMenuKeyMap) listKeyMap() list.KeyMap {
+	return list.KeyMap{
+		CursorUp:             m.CursorUp,
+		CursorDown:           m.CursorDown,
+		PrevPage:             key.NewBinding(key.WithDisabled()),
+		NextPage:             key.NewBinding(key.WithDisabled()),
+		GoToStart:            key.NewBinding(key.WithDisabled()),
+		GoToEnd:              key.NewBinding(key.WithDisabled()),
+		Filter:               key.NewBinding(key.WithDisabled()),
+		ClearFilter:          key.NewBinding(key.WithDisabled()),
+		CancelWhileFiltering: key.NewBinding(key.WithDisabled()),
+		AcceptWhileFiltering: key.NewBinding(key.WithDisabled()),
+		ShowFullHelp:         m.ShowFullHelp,
+		CloseFullHelp:        m.CloseFullHelp,
+	}
+}
+
+func (m mainMenuKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{
+		m.CursorUp,
+		m.CursorDown,
+		m.Select,
+		m.ShowFullHelp,
+	}
+}
+
+func (m mainMenuKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{m.CursorUp, m.CursorDown, m.Select},
+		{m.ShowFullHelp, m.CloseFullHelp, m.Exit},
 	}
 }

@@ -3,17 +3,22 @@ package github
 import (
 	"fmt"
 
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/lipgloss"
 )
 
-func (m Model) View() string {
-	var style = lipgloss.NewStyle().
-		Bold(true).
-		BorderStyle(lipgloss.RoundedBorder()).
-		MaxHeight(30).
-		Padding(1, 4).
-		Margin(1, 1)
+type Styles struct {
+	ViewStyle             lipgloss.Style
+	TitleStyle            lipgloss.Style
+	NormalTextStyle       lipgloss.Style
+	ErrorTextStyle        lipgloss.Style
+	SelectedListItemStyle lipgloss.Style
+	HelpStyles            help.Styles
+}
 
+func (m Model) View() string {
 	var content string
 
 	switch m.state {
@@ -35,71 +40,296 @@ func (m Model) View() string {
 		content = m.viewReposCloned()
 	}
 
-	return style.Render(content)
+	return content
 }
 
 func (m Model) viewAuthenticating() string {
-	return "Authenticating..."
+	return fmt.Sprintf(
+		"%s\n\n%s\n",
+		m.styles.TitleStyle.Render("GitHub"),
+		m.styles.NormalTextStyle.Render("Authenticating..."),
+	)
 }
 
 func (m Model) viewAuthenticationError() string {
+	var err error
 	if m.loginError != nil {
-		return "Login failed."
+		err = m.loginError
+	} else {
+		err = m.authenticationError
 	}
-	return fmt.Sprintf("Not authenticated: %v\nPress <enter> to try again\n", m.authenticationError)
+	return fmt.Sprintf(
+		"%s\n\n%s\n\n%s\n\n%s\n",
+		m.styles.TitleStyle.Render("GitHub"),
+		m.styles.ErrorTextStyle.Render("Ups, something went wrong. You are not authenticated."),
+		m.styles.ErrorTextStyle.Render(err.Error()),
+		m.helpView.View(m.errorKeyMap),
+	)
 }
 
 func (m Model) viewAuthenticated() string {
-	s := "Authenticated! Press <enter> to continue.\n" + m.authenticationStatus
-	return s
+	return fmt.Sprintf(
+		"%s\n\n%s\n\n%s\n\n%s\n",
+		m.styles.TitleStyle.Render("GitHub"),
+		m.styles.NormalTextStyle.Render("You are authenticated!"),
+		m.authenticationStatus,
+		m.helpView.View(m.authenticatedKeyMap),
+	)
 }
 
 func (m Model) viewLoadingRepos() string {
-	return "Authenticated! Loading Repos..."
+	return fmt.Sprintf(
+		"%s\n\n%s\n",
+		m.styles.TitleStyle.Render("GitHub"),
+		m.styles.NormalTextStyle.Render("Loading repos..."),
+	)
 }
 
 func (m Model) viewLoadingReposeError() string {
-	if m.loadingReposError != nil {
-		return fmt.Sprintf("Loading repos failed: %v\nPress <enter> to try again\n", m.loadingReposError)
-	} else {
-		return "Loading repos failed"
-	}
+	return fmt.Sprintf(
+		"%s\n\n%s\n\n%s\n\n%s\n",
+		m.styles.TitleStyle.Render("GitHub"),
+		m.styles.ErrorTextStyle.Render("Ups, loading repos failed."),
+		m.styles.ErrorTextStyle.Render(m.loadingReposError.Error()),
+		m.helpView.View(m.errorKeyMap),
+	)
 }
 
 func (m Model) viewReposLoaded() string {
-	return m.reposList.View()
+	return fmt.Sprintf(
+		"%s\n\n%s\n\n%s\n\n%s\n",
+		m.styles.TitleStyle.Render("GitHub"),
+		m.styles.NormalTextStyle.Render("Select repos to backup"),
+		m.reposList.View(),
+		m.helpView.View(m.reposLoadedKeyMap),
+	)
 }
 
 func (m Model) viewCloningRepos() string {
-	s := "Cloning repos...\n\n"
+	var s string
 	for _, repo := range m.reposToClone {
 		success, ok := m.cloneResult[repo.Id]
+		// TODO could add colors here to checkmark and x -> green/red
 		if !ok {
-			continue
-		}
-		if success {
+			s += fmt.Sprintf("%v  ?\n", repo.NameWithOwner)
+		} else if success {
 			s += fmt.Sprintf("%v  ✓\n", repo.NameWithOwner)
 		} else {
 			s += fmt.Sprintf("%v  x\n", repo.NameWithOwner)
 		}
 
 	}
-	return s
+
+	return fmt.Sprintf(
+		"%s\n\n%s\n\n%s\n",
+		m.styles.TitleStyle.Render("GitHub"),
+		m.styles.NormalTextStyle.Render("Cloning Repos"),
+		m.styles.NormalTextStyle.Render(s),
+	)
 }
 
 func (m Model) viewReposCloned() string {
-	s := "Repos Cloned\n"
+	var s string
 	for _, repo := range m.reposToClone {
 		success, ok := m.cloneResult[repo.Id]
+		// TODO could add colors here to checkmark and x -> green/red
 		if !ok {
-			continue
-		}
-		if success {
+			s += fmt.Sprintf("%v  ?\n", repo.NameWithOwner)
+		} else if success {
 			s += fmt.Sprintf("%v  ✓\n", repo.NameWithOwner)
 		} else {
 			s += fmt.Sprintf("%v  x\n", repo.NameWithOwner)
 		}
 
 	}
-	return s
+
+	return fmt.Sprintf(
+		"%s\n\n%s\n\n%s\n\n%s\n",
+		m.styles.TitleStyle.Render("GitHub"),
+		m.styles.NormalTextStyle.Render("Repos Cloned!"),
+		m.styles.NormalTextStyle.Render(s),
+		m.helpView.View(m.reposClonedKeyMap),
+	)
+}
+
+type errorKeyMap struct {
+	Retry  key.Binding
+	Cancel key.Binding
+}
+
+func defaultErrorKeyMap() errorKeyMap {
+	return errorKeyMap{
+		Retry: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "try again"),
+		),
+		Cancel: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "cancel"),
+		),
+	}
+}
+
+func (m errorKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{
+		m.Retry,
+		m.Cancel,
+	}
+}
+
+func (m errorKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{m.Retry, m.Cancel},
+	}
+}
+
+type authenticatedKeyMap struct {
+	Login    key.Binding
+	Switch   key.Binding
+	Continue key.Binding
+}
+
+func defaultAuthenticatedKeyMap() authenticatedKeyMap {
+	return authenticatedKeyMap{
+		Login: key.NewBinding(
+			key.WithKeys("l"),
+			key.WithHelp("l", "login"),
+		),
+		Switch: key.NewBinding(
+			key.WithKeys("s"),
+			key.WithHelp("s", "switch"),
+		),
+		Continue: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "continue"),
+		),
+	}
+}
+
+func (m authenticatedKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{
+		m.Login,
+		m.Switch,
+		m.Continue,
+	}
+}
+
+func (m authenticatedKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{m.Login, m.Switch, m.Continue},
+	}
+}
+
+type reposLoadedKeyMap struct {
+	CursorUp      key.Binding
+	CursorDown    key.Binding
+	PrevPage      key.Binding
+	NextPage      key.Binding
+	Select        key.Binding
+	SelectAll     key.Binding
+	Continue      key.Binding
+	ShowFullHelp  key.Binding
+	CloseFullHelp key.Binding
+}
+
+func defaultReposLoadedKeyMap() reposLoadedKeyMap {
+	return reposLoadedKeyMap{
+		CursorUp: key.NewBinding(
+			key.WithKeys("k"),
+			key.WithHelp("k", "up"),
+		),
+		CursorDown: key.NewBinding(
+			key.WithKeys("j"),
+			key.WithHelp("j", "down"),
+		),
+		PrevPage: key.NewBinding(
+			key.WithKeys("h"),
+			key.WithHelp("h", "prev page"),
+		),
+		NextPage: key.NewBinding(
+			key.WithKeys("l"),
+			key.WithHelp("l", "next page"),
+		),
+		Select: key.NewBinding(
+			key.WithKeys(" "),
+			key.WithHelp("space", "select"),
+		),
+		SelectAll: key.NewBinding(
+			key.WithKeys("a"),
+			key.WithHelp("a", "toggle all"),
+		),
+		Continue: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "continue"),
+		),
+		// ShowFullHelp: key.NewBinding(
+		// 	key.WithKeys("?"),
+		// 	key.WithHelp("?", "more"),
+		// ),
+		// CloseFullHelp: key.NewBinding(
+		// 	key.WithKeys("?"),
+		// 	key.WithHelp("?", "less"),
+		// ),
+	}
+}
+
+func (m reposLoadedKeyMap) listKeyMap() list.KeyMap {
+	return list.KeyMap{
+		CursorUp:             m.CursorUp,
+		CursorDown:           m.CursorDown,
+		PrevPage:             m.PrevPage,
+		NextPage:             m.NextPage,
+		GoToStart:            key.NewBinding(key.WithDisabled()),
+		GoToEnd:              key.NewBinding(key.WithDisabled()),
+		Filter:               key.NewBinding(key.WithDisabled()),
+		ClearFilter:          key.NewBinding(key.WithDisabled()),
+		CancelWhileFiltering: key.NewBinding(key.WithDisabled()),
+		AcceptWhileFiltering: key.NewBinding(key.WithDisabled()),
+		ShowFullHelp:         key.NewBinding(key.WithDisabled()),
+		CloseFullHelp:        key.NewBinding(key.WithDisabled()),
+	}
+}
+
+func (m reposLoadedKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{
+		m.CursorUp,
+		m.CursorDown,
+		m.PrevPage,
+		m.NextPage,
+		m.Select,
+		m.SelectAll,
+		m.Continue,
+	}
+}
+
+func (m reposLoadedKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{m.CursorUp, m.CursorDown, m.PrevPage, m.NextPage},
+		{m.Select, m.SelectAll, m.Continue},
+	}
+}
+
+type reposClonedKeyMap struct {
+	Return key.Binding
+}
+
+func defaultReposClonedKeyMap() reposClonedKeyMap {
+	return reposClonedKeyMap{
+		Return: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "return to main menu"),
+		),
+	}
+}
+
+func (m reposClonedKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{
+		m.Return,
+	}
+}
+
+func (m reposClonedKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{m.Return},
+	}
 }

@@ -3,6 +3,7 @@ package github
 import (
 	"fmt"
 	"io"
+	"log"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -23,18 +24,30 @@ type List struct {
 	reposListDelegate *itemDelegate
 }
 
-func NewList(repos []Repo) *List {
+func NewList(repos []Repo, keyMap list.KeyMap) *List {
 	items := make([]list.Item, len(repos))
 	for i, r := range repos {
 		items[i] = r
 	}
+	// initially select all items
 	reposListDelegate := NewItemDelegate()
-	// TODO what to do about these values, how can we make it fit where we don't just show a single item?
-	reposList := list.New(items, reposListDelegate, 0, 0)
+	for _, repo := range repos {
+		reposListDelegate.Selected[repo.Id] = struct{}{}
+	}
+	// TODO what about these values?
+	reposList := list.New(items, reposListDelegate, 0, 10)
+	reposList.SetFilteringEnabled(false)
+	reposList.SetShowHelp(false)
+	reposList.DisableQuitKeybindings()
+	reposList.SetShowStatusBar(false)
+	reposList.SetShowPagination(true)
+	reposList.SetShowTitle(false)
+	reposList.KeyMap = keyMap
+
 	return &List{
 		repos:             repos,
 		reposList:         reposList,
-		reposListDelegate: &reposListDelegate,
+		reposListDelegate: reposListDelegate,
 	}
 }
 
@@ -47,10 +60,23 @@ func (l *List) Update(msg tea.Msg) tea.Cmd {
 		case " ":
 			repo, ok := l.reposList.SelectedItem().(Repo)
 			if ok {
+				log.Println("select", len(l.reposListDelegate.Selected))
 				_, selected := l.reposListDelegate.Selected[repo.Id]
 				if selected {
 					delete(l.reposListDelegate.Selected, repo.Id)
 				} else {
+					l.reposListDelegate.Selected[repo.Id] = struct{}{}
+				}
+			}
+		case "a":
+			if len(l.reposListDelegate.Selected) > 0 {
+				// unselect all
+				log.Println("unselect all", l.reposListDelegate.Selected)
+				l.reposListDelegate.Selected = map[string]struct{}{}
+			} else {
+				// select all
+				log.Println("select all", l.reposListDelegate.Selected)
+				for _, repo := range l.repos {
 					l.reposListDelegate.Selected[repo.Id] = struct{}{}
 				}
 			}
@@ -88,8 +114,8 @@ type itemDelegate struct {
 	Selected map[string]struct{}
 }
 
-func NewItemDelegate() itemDelegate {
-	return itemDelegate{
+func NewItemDelegate() *itemDelegate {
+	return &itemDelegate{
 		itemStyle:         lipgloss.NewStyle().PaddingLeft(4),
 		selectedItemStyle: lipgloss.NewStyle().PaddingLeft(2).Foreground(lipgloss.Color("170")),
 		Selected:          map[string]struct{}{},

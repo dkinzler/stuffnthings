@@ -3,6 +3,7 @@ package main
 import (
 	"backuper/github"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -19,74 +20,18 @@ import (
 
 /*
 TODO
+* don't need confirm dialog for backup and zip
+* do we need it for github? probably
 * refactoring
-    * add confirm view to state -> ConfirmGoBack
-    * save current state, have a method to switch state, which sets last and current state
-    * when confirm view gets accepted can move back to last state
-    * do some renames so that it is clerar which variable is from which state
-        * rename list to mainMenuList
-        * rename keyMap to mainMenukeyMap and helpView to mainMenuHelpView
-        * move those up to mainMenuList
-    * backup
-        * create keymap keep it in Model with backup fields
-        * create helpmodel
-    * zip
-        * create keymap and help model
-        * make zipError a string, because we want to display a string
-            * so whatever we get from result we need to transform or we transform it already in zip function?
-    * create all the models when in NewModel()
-        * and then reset them when appropriate
-        * i.e. do this for backup and zip, for mainMenu we already do it
-    * mainMenu create custom item delegate to control rendering
-        * have a description for each
-        * for backup we want to show the currently selected dir
-        * we either have to set this is a var in the delegate and update it
-            * or we can somehow access the model?
-    * styling
-        * define Styles struct with different fields
-        * have a method defaultStyles() that returns a Styles instance
-        * save this in models and pass it to GithubModel
-        * what styles? keep it very simple
-            * ViewStyle for the content wrapper
-            * HelpStyle for help text everywhere
-            * ListItem Style
-            * SelectedListItem Style
-            * TitleStyle for headers
-                * can we make text a bit bigger or only e.g. bold?
-            * ErrorStyle in red?
-            * NormalTextStyle might be same as ListItemStyle?
-        * need to figure out how to set these everywhere
-            * for list we do it with the delegate?
-            * for help we need to pass it to help.Model -> but hthis already requires certain styles?
-    * refactor View()
-        * is lipgloss.PlaceHorizontal and PlaceVertical useful?
-        * can use fmt.Sprintf everywhere, as a sequence of rendering different things
-            * title, content, help, maybe an error
-        * apply ViewStyle globally at the end
     * more styling
         * figure out how to handle windowresizes
             * for mainMenu
                 * we want to set the available height, we will now the necessary height
                     * because we know how many lines the main menu list item delegate will use
             * just make some useful defaults, don't try to handle every case, if someone tries to run this in a window with only 2 lines fuck em
-    * github refactor
-        * can we handle cloningRepos and reposCloned differently?
-            * just show a done text at the end if we are done but not a separate reposCloned state?
-            * just keep it like this
-        * do we need to group or rename any model fields?
-        * create keymaps and help models for the different screens
-            * need one for Authenticated and AuthenticationError
-            * need one for ListRepos, same thing as for mainMenu list = needs a conversion function
-        * update ListRepo screen
-            * add custom help view
-            * need to run the same functions as on main menu to remove title and co
-        * cloningrepos screen
-            * show all repos initially with a "?", need to make sure that we are consistent
-                * in the iteration order
-        * refactor view and styling
-            * can basically use same styles everywhere, don't need anything special
     * error handling
         * how to get back better errors from commands? we probably have to read out/err streams?
+        * also for zip command, parse error message better
 * testing
     * think a bit about testing and how to do it
     * we could create a model and feed it articial events and see what commands and new state it returns?
@@ -95,9 +40,10 @@ TODO
 * optional
     * a header at the top always that shows the current step or progress like 1/4?
     * validate backup dir that it would be writable? don't really need this, keep this on the user
+    * mainMenuKeyMap, backupDirKeyMap and zipKeyMap all through a single type with functions that return a keymap?
+* what could be changed in the future?
+    * the way we handle esc, returning to main menu, should the inner model handle this how it likes? -> probably
 */
-
-var docStyle = lipgloss.NewStyle().Margin(1, 2)
 
 func main() {
 	f, err := tea.LogToFile("log.txt", "log")
@@ -118,41 +64,52 @@ type State int
 
 const (
 	MainMenu State = iota
+	ConfirmGoBack
 	BackupDir
 	Zip
 	Inner
 )
 
 type Model struct {
-	state             State
-	confirmViewActive bool
+	lastState State
+	state     State
 
-	list list.Model
+	mainMenuList         list.Model
+	mainMenuItemDelegate *mainMenuItemDelegate
+	mainMenuKeyMap       mainMenuKeyMap
+
+	backupDirTextInput  textinput.Model
+	backupDirInputValid bool
+	backupDir           string
+	backupDirKeyMap     backupDirKeyMap
+
+	zipTextInput  textinput.Model
+	zipInputValid bool
+	zipError      string
+	zipKeyMap     zipKeyMap
 
 	inner tea.Model
 
-	backupDir string
-
-	backupDirTextInput    textinput.Model
-	backupDirInputInvalid bool
-
-	zipTextInput    textinput.Model
-	zipInputInvalid bool
-	zipError        error
-
-	keyMap   mainMenuKeyMap
 	helpView help.Model
+
+	styles Styles
 }
 
 func NewModel() Model {
 	keyMap := defaultMainMenuKeyMap()
+	backupDir := defaultBackupDir()
+	styles := defaultStyles()
 
 	items := []list.Item{
-		item("Github"),
-		item("Backup"),
-		item("Zip"),
+		item("github"),
+		item("backup"),
+		item("zip"),
 	}
-	list := list.New(items, list.NewDefaultDelegate(), 0, 0)
+	itemDelegate := &mainMenuItemDelegate{backupDir: backupDir}
+	itemDelegate.itemTitleStyle = styles.NormalTextStyle
+	itemDelegate.itemDescriptionStyle = styles.NormalTextStyle.Faint(true)
+	itemDelegate.selectedItemStyle = styles.SelectedListItemStyle
+	list := list.New(items, itemDelegate, 0, 0)
 	list.SetFilteringEnabled(false)
 	list.SetShowHelp(false)
 	list.DisableQuitKeybindings()
@@ -161,20 +118,47 @@ func NewModel() Model {
 	list.SetShowTitle(false)
 	list.KeyMap = keyMap.listKeyMap()
 
+	bt := textinput.New()
+	bt.Placeholder = backupDir
+	bt.CharLimit = 250
+	bt.Width = 40
+
+	zt := textinput.New()
+	zt.CharLimit = 250
+	zt.Width = 40
+
+	helpView := help.New()
+	helpView.Styles = styles.HelpStyles
+	helpView.ShowAll = true
+
 	return Model{
-		state:             MainMenu,
-		confirmViewActive: false,
-		list:              list,
-		inner:             nil,
-		backupDir:         defaultBackupDir(),
-		keyMap:            keyMap,
-		helpView:          help.New(),
+		lastState:            MainMenu,
+		state:                MainMenu,
+		mainMenuList:         list,
+		mainMenuItemDelegate: itemDelegate,
+		mainMenuKeyMap:       keyMap,
+		backupDirTextInput:   bt,
+		backupDirInputValid:  true,
+		backupDir:            backupDir,
+		backupDirKeyMap:      defaultBackupDirKeyMap(),
+		zipTextInput:         zt,
+		zipInputValid:        true,
+		zipError:             "",
+		zipKeyMap:            defaultZipKeyMap(),
+		inner:                nil,
+		helpView:             helpView,
+		styles:               styles,
 	}
 }
 
 func defaultBackupDir() string {
 	date := time.Now().Format(time.DateOnly)
 	return filepath.Join("~/backup", date)
+}
+
+func (m *Model) setState(state State) {
+	m.lastState = m.state
+	m.state = state
 }
 
 func (m Model) Init() tea.Cmd {
@@ -189,28 +173,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		case "esc":
-			if !m.confirmViewActive && m.state != MainMenu {
-				m.confirmViewActive = true
+			if m.state != ConfirmGoBack && m.state != MainMenu {
+				m.setState(ConfirmGoBack)
 			}
 			return m, nil
-		case "y":
-			if m.confirmViewActive {
-				m.confirmViewActive = false
-				m.state = MainMenu
-				m.inner = nil
-				return m, nil
-			}
-		case "n":
-			if m.confirmViewActive {
-				m.confirmViewActive = false
-				return m, nil
-			}
 		}
 	case tea.WindowSizeMsg:
 		// TODO yes this is what we need, need to do this everywhere we have a list
-		h, _ := docStyle.GetFrameSize()
+		h, _ := m.styles.ViewStyle.GetFrameSize()
 		// m.list.SetSize(msg.Width-h, msg.Height-v)
-		m.list.SetSize(msg.Width-h, 12)
+		m.mainMenuList.SetSize(msg.Width-h, 9)
 		// TODO forward these to inner?
 	}
 
@@ -224,36 +196,53 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "enter":
 				// TODO disable filtering on list
-				s := string(m.list.SelectedItem().(item))
+				s := string(m.mainMenuList.SelectedItem().(item))
 				switch s {
-				case "Github":
-					m.state = Inner
-					m.inner = github.NewModel(m.backupDir)
+				// TODO should have these as constants mainMenuItemGithub
+				case "github":
+					m.setState(Inner)
+					m.inner = github.NewModel(m.backupDir, github.Styles{
+						ViewStyle:             m.styles.ViewStyle,
+						TitleStyle:            m.styles.TitleStyle,
+						NormalTextStyle:       m.styles.NormalTextStyle,
+						ErrorTextStyle:        m.styles.ErrorTextStyle,
+						SelectedListItemStyle: m.styles.SelectedListItemStyle,
+						HelpStyles:            m.styles.HelpStyles,
+					})
 					cmd = m.inner.Init()
-				case "Backup":
-					m.state = BackupDir
-					t := textinput.New()
-					t.Placeholder = m.backupDir
-					t.Focus()
-					t.CharLimit = 250
-					t.Width = 40
-					m.backupDirTextInput = t
-					m.backupDirInputInvalid = false
-				case "Zip":
-					m.state = Zip
-					t := textinput.New()
-					t.Focus()
-					t.CharLimit = 250
-					t.Width = 40
-					m.zipTextInput = t
-					m.zipInputInvalid = false
+				case "backup":
+					m.setState(BackupDir)
+					m.backupDirTextInput.Reset()
+					m.backupDirTextInput.Placeholder = m.backupDir
+					m.backupDirTextInput.Focus()
+					m.backupDirInputValid = true
+				case "zip":
+					m.setState(Zip)
+					m.zipTextInput.Reset()
+					m.zipTextInput.Focus()
+					m.zipInputValid = true
 				}
 				return m, cmd
 			case "?":
 				m.helpView.ShowAll = !m.helpView.ShowAll
 			}
 		}
-		m.list, cmd = m.list.Update(msg)
+		m.mainMenuList, cmd = m.mainMenuList.Update(msg)
+
+	case ConfirmGoBack:
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "y":
+				m.setState(MainMenu)
+				m.inner = nil
+				return m, nil
+			case "n":
+				m.setState(m.lastState)
+				return m, nil
+			}
+		}
+
 	case BackupDir:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
@@ -262,12 +251,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// TODO check if valid
 				dir := m.backupDirTextInput.Value()
 				if dir == "" {
-					m.backupDirInputInvalid = true
+					m.backupDirInputValid = false
 				} else {
 					m.backupDir = dir
-					m.backupDirTextInput = textinput.Model{}
-					m.backupDirInputInvalid = false
-					m.state = MainMenu
+					m.mainMenuItemDelegate.backupDir = dir
+					m.backupDirTextInput.Reset()
+					m.backupDirInputValid = true
+					m.setState(MainMenu)
 				}
 				return m, cmd
 			}
@@ -280,21 +270,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				file := m.zipTextInput.Value()
 				if file == "" {
-					m.zipInputInvalid = true
+					m.zipInputValid = false
 				} else {
-					m.zipInputInvalid = false
+					m.zipInputValid = true
 					cmd = zip(m.backupDir, file)
 				}
 				return m, cmd
 			}
 		case zipResult:
 			if msg.err == nil {
-				m.zipError = nil
-				m.zipTextInput = textinput.Model{}
-				m.state = MainMenu
+				m.zipError = ""
+				m.zipTextInput.Reset()
+				m.setState(MainMenu)
 				return m, cmd
 			} else {
-				m.zipError = msg.err
+				m.zipError = msg.err.Error()
 			}
 		}
 		m.zipTextInput, cmd = m.zipTextInput.Update(msg)
@@ -306,54 +296,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
-	if m.confirmViewActive {
-		return docStyle.Render("Do you really want to return to main screen?")
-	}
+	var content string
+
 	switch m.state {
 	case MainMenu:
-		return docStyle.Render(fmt.Sprintf("%s\n\n%s\n\n", m.list.View(), m.helpView.View(m.keyMap)))
-	case BackupDir:
-		if m.backupDirInputInvalid {
-			return fmt.Sprintf(
-				"Enter new backup directory:\n\n%s\n\n%s\n\n%s\n",
-				m.backupDirTextInput.View(),
-				"Invalid directory.",
-				"(enter) to confirm",
-			)
-		}
-		return fmt.Sprintf(
-			"Enter new backup directory:\n\n%s\n\n%s\n",
-			m.backupDirTextInput.View(),
-			"(enter) to confirm",
+		content = fmt.Sprintf(
+			"%s\n\n%s\n\n%s\n",
+			m.styles.TitleStyle.Render("Backup"),
+			m.mainMenuList.View(),
+			m.helpView.View(m.mainMenuKeyMap),
 		)
+	case ConfirmGoBack:
+		content = fmt.Sprintf(
+			"%s\n",
+			m.styles.NormalTextStyle.Render("Do you want to return to the main menu? <y> to confirm, <n> to cancel"),
+		)
+	case BackupDir:
+		content = fmt.Sprintf(
+			"%s\n\n%s\n\n",
+			m.styles.TitleStyle.Render("Change Backup Directory"),
+			m.backupDirTextInput.View(),
+		)
+		if !m.backupDirInputValid {
+			content = fmt.Sprintf("%s%s\n\n", content, m.styles.ErrorTextStyle.Render("invalid directory"))
+		}
+		content = fmt.Sprintf("%s%s\n", content, m.helpView.View(m.backupDirKeyMap))
 	case Zip:
-		if m.zipInputInvalid {
-			return fmt.Sprintf(
-				"Zip output file:\n\n%s\n\n%s\n\n%s\n",
-				m.zipTextInput.View(),
-				"Invalid input.",
-				"(enter) to zip",
-			)
+		content = fmt.Sprintf(
+			"%s\n\n%s\n\n",
+			m.styles.TitleStyle.Render("Zip Backup Directory"),
+			m.zipTextInput.View(),
+		)
+		if !m.zipInputValid {
+			content = fmt.Sprintf("%s%s\n\n", content, m.styles.ErrorTextStyle.Render("invalid filename"))
+		} else if m.zipError != "" {
+			content = fmt.Sprintf("%s%s\n\n", content, m.styles.ErrorTextStyle.Render(m.zipError))
 		}
-		if m.zipError == nil {
-			return fmt.Sprintf(
-				"Zip output file:\n\n%s\n\n%s\n",
-				m.zipTextInput.View(),
-				"(enter) to zip",
-			)
-		} else {
-			return fmt.Sprintf(
-				"Zip output file:\n\n%s\n\n%s\n\n %s: %v\n",
-				m.zipTextInput.View(),
-				"zip failed",
-				m.zipError,
-				"(enter) to try again",
-			)
-		}
+		content = fmt.Sprintf("%s%s\n", content, m.helpView.View(m.zipKeyMap))
 	case Inner:
-		return m.inner.View()
+		content = m.inner.View()
 	}
-	return ""
+	return m.styles.ViewStyle.Render(content)
 }
 
 type item string
@@ -384,12 +367,12 @@ func zip(dir string, file string) tea.Cmd {
 }
 
 type mainMenuKeyMap struct {
-	CursorUp      key.Binding
-	CursorDown    key.Binding
-	ShowFullHelp  key.Binding
-	CloseFullHelp key.Binding
-	Select        key.Binding
-	Exit          key.Binding
+	CursorUp   key.Binding
+	CursorDown key.Binding
+	// ShowFullHelp  key.Binding
+	// CloseFullHelp key.Binding
+	Select key.Binding
+	Exit   key.Binding
 }
 
 func defaultMainMenuKeyMap() mainMenuKeyMap {
@@ -402,14 +385,14 @@ func defaultMainMenuKeyMap() mainMenuKeyMap {
 			key.WithKeys("j"),
 			key.WithHelp("j", "down"),
 		),
-		ShowFullHelp: key.NewBinding(
-			key.WithKeys("?"),
-			key.WithHelp("?", "more"),
-		),
-		CloseFullHelp: key.NewBinding(
-			key.WithKeys("?"),
-			key.WithHelp("?", "less"),
-		),
+		// ShowFullHelp: key.NewBinding(
+		// 	key.WithKeys("?"),
+		// 	key.WithHelp("?", "more"),
+		// ),
+		// CloseFullHelp: key.NewBinding(
+		// 	key.WithKeys("?"),
+		// 	key.WithHelp("?", "less"),
+		// ),
 		Select: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "select"),
@@ -433,8 +416,8 @@ func (m mainMenuKeyMap) listKeyMap() list.KeyMap {
 		ClearFilter:          key.NewBinding(key.WithDisabled()),
 		CancelWhileFiltering: key.NewBinding(key.WithDisabled()),
 		AcceptWhileFiltering: key.NewBinding(key.WithDisabled()),
-		ShowFullHelp:         m.ShowFullHelp,
-		CloseFullHelp:        m.CloseFullHelp,
+		ShowFullHelp:         key.NewBinding(key.WithDisabled()),
+		CloseFullHelp:        key.NewBinding(key.WithDisabled()),
 	}
 }
 
@@ -443,13 +426,159 @@ func (m mainMenuKeyMap) ShortHelp() []key.Binding {
 		m.CursorUp,
 		m.CursorDown,
 		m.Select,
-		m.ShowFullHelp,
+		m.Exit,
 	}
 }
 
 func (m mainMenuKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{m.CursorUp, m.CursorDown, m.Select},
-		{m.ShowFullHelp, m.CloseFullHelp, m.Exit},
+		{m.CursorUp, m.CursorDown},
+		{m.Select, m.Exit},
+	}
+}
+
+type backupDirKeyMap struct {
+	Confirm key.Binding
+	Cancel  key.Binding
+}
+
+func defaultBackupDirKeyMap() backupDirKeyMap {
+	return backupDirKeyMap{
+		Confirm: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "confirm"),
+		),
+		Cancel: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "cancel"),
+		),
+	}
+}
+
+func (m backupDirKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{m.Cancel, m.Confirm}
+}
+
+func (m backupDirKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{{m.Cancel}, {m.Confirm}}
+}
+
+type zipKeyMap struct {
+	Confirm key.Binding
+	Cancel  key.Binding
+}
+
+func defaultZipKeyMap() zipKeyMap {
+	return zipKeyMap{
+		Confirm: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "confirm"),
+		),
+		Cancel: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "cancel"),
+		),
+	}
+}
+
+func (m zipKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{m.Cancel, m.Confirm}
+}
+
+func (m zipKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{{m.Cancel}, {m.Confirm}}
+}
+
+type mainMenuItemDelegate struct {
+	itemTitleStyle       lipgloss.Style
+	itemDescriptionStyle lipgloss.Style
+	selectedItemStyle    lipgloss.Style
+
+	backupDir string
+}
+
+func (d mainMenuItemDelegate) Height() int {
+	return 2
+}
+
+func (d mainMenuItemDelegate) Spacing() int {
+	return 1
+}
+
+func (d mainMenuItemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd {
+	return nil
+}
+
+func (d mainMenuItemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
+	item := string(listItem.(item))
+
+	var title string
+	var description string
+
+	switch item {
+	case "github":
+		title = "GitHub"
+		description = "Backup your repos"
+	case "backup":
+		title = "Change Backup Directory"
+		description = d.backupDir
+	case "zip":
+		title = "Zip"
+		description = "Zip Backup Directory"
+	default:
+		return
+	}
+
+	s := fmt.Sprintf("%s\n%s", d.itemTitleStyle.Render(title), d.itemDescriptionStyle.Render(description))
+	if index == m.Index() {
+		s = d.selectedItemStyle.Render(s)
+	}
+
+	fmt.Fprintf(w, s)
+}
+
+type Styles struct {
+	ViewStyle             lipgloss.Style
+	TitleStyle            lipgloss.Style
+	NormalTextStyle       lipgloss.Style
+	ErrorTextStyle        lipgloss.Style
+	SelectedListItemStyle lipgloss.Style
+	HelpStyles            help.Styles
+}
+
+func defaultStyles() Styles {
+	// copied these styles from the charmbracelet/bubbles/help package
+	// TODO change these a bit
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{
+		Light: "#909090",
+		Dark:  "#626262",
+	})
+
+	descStyle := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{
+		Light: "#B2B2B2",
+		Dark:  "#4A4A4A",
+	})
+
+	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{
+		Light: "#DDDADA",
+		Dark:  "#3C3C3C",
+	})
+	helpStyles := help.Styles{
+		Ellipsis:       sepStyle,
+		ShortKey:       keyStyle,
+		ShortDesc:      descStyle,
+		ShortSeparator: sepStyle,
+		FullKey:        keyStyle,
+		FullDesc:       descStyle,
+		FullSeparator:  sepStyle,
+	}
+
+	return Styles{
+		ViewStyle:             lipgloss.NewStyle().Margin(1),
+		TitleStyle:            lipgloss.NewStyle().Bold(true).Padding(0, 3).Background(lipgloss.Color("#fc03ec")).Foreground(lipgloss.Color("#ffffff")),
+		NormalTextStyle:       lipgloss.NewStyle(),
+		ErrorTextStyle:        lipgloss.NewStyle().Foreground(lipgloss.Color("#ff0000")),
+		SelectedListItemStyle: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#fc03ec")),
+		HelpStyles:            helpStyles,
 	}
 }

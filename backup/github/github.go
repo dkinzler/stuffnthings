@@ -8,8 +8,14 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/charmbracelet/bubbles/help"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+/*
+TODO
+* could make view code a bit more dry by setting title/helpView globally and just return the content from methods
+*/
 
 type State int
 
@@ -41,16 +47,30 @@ type Model struct {
 	repos             []Repo
 	loadingReposError error
 
-	reposList *List
+	reposList       *List
+	validationError string
 
 	reposToClone []Repo
 
 	cloneResult map[string]bool
 
 	backupDir string
+
+	errorKeyMap         errorKeyMap
+	authenticatedKeyMap authenticatedKeyMap
+	reposLoadedKeyMap   reposLoadedKeyMap
+	reposClonedKeyMap   reposClonedKeyMap
+
+	helpView help.Model
+
+	styles Styles
 }
 
-func NewModel(backupRoot string) Model {
+func NewModel(backupRoot string, styles Styles) Model {
+	helpView := help.New()
+	helpView.Styles = styles.HelpStyles
+	helpView.ShowAll = true
+
 	return Model{
 		state:                Authenticating,
 		authenticationStatus: "",
@@ -59,9 +79,18 @@ func NewModel(backupRoot string) Model {
 		repos:                nil,
 		loadingReposError:    nil,
 		reposList:            nil,
+		validationError:      "",
 		reposToClone:         nil,
 		cloneResult:          map[string]bool{},
 		backupDir:            filepath.Join(backupRoot, "github"),
+
+		errorKeyMap:         defaultErrorKeyMap(),
+		authenticatedKeyMap: defaultAuthenticatedKeyMap(),
+		reposLoadedKeyMap:   defaultReposLoadedKeyMap(),
+		reposClonedKeyMap:   defaultReposClonedKeyMap(),
+
+		styles:   styles,
+		helpView: helpView,
 	}
 }
 
@@ -117,6 +146,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.authenticationError = nil
 				m.loginError = nil
 				cmd = login()
+			case "s":
+				m.state = Authenticating
+				m.authenticationStatus = ""
+				m.authenticationError = nil
+				m.loginError = nil
+				cmd = switchUser()
 			}
 		}
 
@@ -127,7 +162,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = ReposLoaded
 				m.repos = msg.repos
 				m.loadingReposError = nil
-				m.reposList = NewList(m.repos)
+				m.reposList = NewList(m.repos, m.reposLoadedKeyMap.listKeyMap())
+				m.validationError = ""
 			} else {
 				m.state = LoadingReposError
 				m.repos = nil
@@ -153,13 +189,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "enter":
 				m.reposToClone = m.reposList.Selected()
-
-				m.state = CloningRepos
-				var cmds []tea.Cmd
-				for _, r := range m.reposToClone {
-					cmds = append(cmds, cloneRepo(r, m.backupDir))
+				if len(m.reposToClone) == 0 {
+					m.validationError = "No repos selected"
+				} else {
+					m.state = CloningRepos
+					m.validationError = ""
+					var cmds []tea.Cmd
+					for _, r := range m.reposToClone {
+						cmds = append(cmds, cloneRepo(r, m.backupDir))
+					}
+					cmd = tea.Batch(cmds...)
 				}
-				cmd = tea.Batch(cmds...)
 			default:
 				cmd = m.reposList.Update(msg)
 			}
@@ -181,10 +221,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case ReposCloned:
-		// TODO can press enter here to retry failed ones?
-		// how would we handle this with reposToClone and cloneResult?
-		// maybe have another list that keeps those currently in progress of cloning?
-
 	}
 	return m, cmd
 }
@@ -212,6 +248,16 @@ type loginResult struct {
 func login() tea.Cmd {
 	return func() tea.Msg {
 		c := exec.Command("gh", "auth", "login")
+		return tea.ExecProcess(c, func(err error) tea.Msg {
+			log.Println(err)
+			return loginResult{err: err}
+		})()
+	}
+}
+
+func switchUser() tea.Cmd {
+	return func() tea.Msg {
+		c := exec.Command("gh", "auth", "switch")
 		return tea.ExecProcess(c, func(err error) tea.Msg {
 			log.Println(err)
 			return loginResult{err: err}

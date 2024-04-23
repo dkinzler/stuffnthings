@@ -11,16 +11,8 @@ import (
 )
 
 type List struct {
-	// TODO in general, see also the TODO below we probably want to wrap all this in a custom struct
-	// that internally has this list and delegate
-	// that model can then handle the space key event, we don't have to handle it here
-	// and we have a simple method to get a list of the selected repos
-	// yesyes
-	repos     []Repo
-	reposList list.Model
-	// TODO might want to use a pointer here? so we can e.g. reset selected items more easily
-	// otherwise assigning a new map to reposListDelegate.Selected might not have an effect on the
-	// copy passed to reposList
+	repos             []Repo
+	reposList         list.Model
 	reposListDelegate *itemDelegate
 }
 
@@ -34,8 +26,7 @@ func NewList(repos []Repo, keyMap list.KeyMap) *List {
 	for _, repo := range repos {
 		reposListDelegate.Selected[repo.Id] = struct{}{}
 	}
-	// TODO what about these values?
-	reposList := list.New(items, reposListDelegate, 0, 10)
+	reposList := list.New(items, reposListDelegate, 0, 0)
 	reposList.SetFilteringEnabled(false)
 	reposList.SetShowHelp(false)
 	reposList.DisableQuitKeybindings()
@@ -87,6 +78,10 @@ func (l *List) Update(msg tea.Msg) tea.Cmd {
 		l.reposList, cmd = l.reposList.Update(msg)
 	}
 	return cmd
+}
+
+func (l *List) SetSize(w, h int) {
+	l.reposList.SetSize(w, h)
 }
 
 func (l *List) View() string {

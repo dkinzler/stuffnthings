@@ -18,7 +18,7 @@ type Styles struct {
 	HelpStyles            help.Styles
 }
 
-func (m Model) View() string {
+func (m *Model) View() string {
 	var content string
 
 	switch m.state {
@@ -43,7 +43,7 @@ func (m Model) View() string {
 	return content
 }
 
-func (m Model) viewAuthenticating() string {
+func (m *Model) viewAuthenticating() string {
 	return fmt.Sprintf(
 		"%s\n\n%s\n",
 		m.styles.TitleStyle.Render("GitHub"),
@@ -51,7 +51,7 @@ func (m Model) viewAuthenticating() string {
 	)
 }
 
-func (m Model) viewAuthenticationError() string {
+func (m *Model) viewAuthenticationError() string {
 	var err error
 	if m.loginError != nil {
 		err = m.loginError
@@ -67,7 +67,7 @@ func (m Model) viewAuthenticationError() string {
 	)
 }
 
-func (m Model) viewAuthenticated() string {
+func (m *Model) viewAuthenticated() string {
 	return fmt.Sprintf(
 		"%s\n\n%s\n\n%s\n\n%s\n",
 		m.styles.TitleStyle.Render("GitHub"),
@@ -77,7 +77,7 @@ func (m Model) viewAuthenticated() string {
 	)
 }
 
-func (m Model) viewLoadingRepos() string {
+func (m *Model) viewLoadingRepos() string {
 	return fmt.Sprintf(
 		"%s\n\n%s\n",
 		m.styles.TitleStyle.Render("GitHub"),
@@ -85,7 +85,7 @@ func (m Model) viewLoadingRepos() string {
 	)
 }
 
-func (m Model) viewLoadingReposeError() string {
+func (m *Model) viewLoadingReposeError() string {
 	return fmt.Sprintf(
 		"%s\n\n%s\n\n%s\n\n%s\n",
 		m.styles.TitleStyle.Render("GitHub"),
@@ -95,7 +95,7 @@ func (m Model) viewLoadingReposeError() string {
 	)
 }
 
-func (m Model) viewReposLoaded() string {
+func (m *Model) viewReposLoaded() string {
 	return fmt.Sprintf(
 		"%s\n\n%s\n\n%s\n\n%s\n",
 		m.styles.TitleStyle.Render("GitHub"),
@@ -105,17 +105,19 @@ func (m Model) viewReposLoaded() string {
 	)
 }
 
-func (m Model) viewCloningRepos() string {
+var checkmark = lipgloss.NewStyle().Foreground(lipgloss.Color("#7ef542")).Render("✓")
+var cross = lipgloss.NewStyle().Foreground(lipgloss.Color("#de0d18")).Render("x")
+
+func (m *Model) viewCloningRepos() string {
 	var s string
 	for _, repo := range m.reposToClone {
 		success, ok := m.cloneResult[repo.Id]
-		// TODO could add colors here to checkmark and x -> green/red
 		if !ok {
-			s += fmt.Sprintf("%v  ?\n", repo.NameWithOwner)
+			s += fmt.Sprintf("%s  ?\n", repo.NameWithOwner)
 		} else if success {
-			s += fmt.Sprintf("%v  ✓\n", repo.NameWithOwner)
+			s += fmt.Sprintf("%s  %s\n", repo.NameWithOwner, checkmark)
 		} else {
-			s += fmt.Sprintf("%v  x\n", repo.NameWithOwner)
+			s += fmt.Sprintf("%s  %s\n", repo.NameWithOwner, cross)
 		}
 
 	}
@@ -128,20 +130,19 @@ func (m Model) viewCloningRepos() string {
 	)
 }
 
-func (m Model) viewReposCloned() string {
+func (m *Model) viewReposCloned() string {
 	var s string
 	for _, repo := range m.reposToClone {
 		success, ok := m.cloneResult[repo.Id]
-		// TODO could add colors here to checkmark and x -> green/red
 		if !ok {
-			s += fmt.Sprintf("%v  ?\n", repo.NameWithOwner)
+			s += fmt.Sprintf("%s  ?\n", repo.NameWithOwner)
 		} else if success {
-			s += fmt.Sprintf("%v  ✓\n", repo.NameWithOwner)
+			s += fmt.Sprintf("%s  %s\n", repo.NameWithOwner, checkmark)
 		} else {
-			s += fmt.Sprintf("%v  x\n", repo.NameWithOwner)
+			s += fmt.Sprintf("%s  %s\n", repo.NameWithOwner, cross)
 		}
-
 	}
+	s += fmt.Sprintf("%s  %s\n", "cross/test", cross)
 
 	return fmt.Sprintf(
 		"%s\n\n%s\n\n%s\n\n%s\n",
@@ -262,14 +263,6 @@ func defaultReposLoadedKeyMap() reposLoadedKeyMap {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "continue"),
 		),
-		// ShowFullHelp: key.NewBinding(
-		// 	key.WithKeys("?"),
-		// 	key.WithHelp("?", "more"),
-		// ),
-		// CloseFullHelp: key.NewBinding(
-		// 	key.WithKeys("?"),
-		// 	key.WithHelp("?", "less"),
-		// ),
 	}
 }
 

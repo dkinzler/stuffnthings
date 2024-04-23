@@ -1,13 +1,15 @@
 package main
 
 import (
-	"backuper/github"
+	bexec "backup/exec"
+	"backup/github"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -20,29 +22,20 @@ import (
 
 /*
 TODO
-* don't need confirm dialog for backup and zip
-* do we need it for github? probably
-* refactoring
-    * more styling
-        * figure out how to handle windowresizes
-            * for mainMenu
-                * we want to set the available height, we will now the necessary height
-                    * because we know how many lines the main menu list item delegate will use
-            * just make some useful defaults, don't try to handle every case, if someone tries to run this in a window with only 2 lines fuck em
-    * error handling
-        * how to get back better errors from commands? we probably have to read out/err streams?
-        * also for zip command, parse error message better
+* retry cloning?
 * testing
     * think a bit about testing and how to do it
     * we could create a model and feed it articial events and see what commands and new state it returns?
     * i.e. just testing the state machine
-* rename module to backup instead of backuper?
 * optional
-    * a header at the top always that shows the current step or progress like 1/4?
-    * validate backup dir that it would be writable? don't really need this, keep this on the user
     * mainMenuKeyMap, backupDirKeyMap and zipKeyMap all through a single type with functions that return a keymap?
+        * how could this be done?
 * what could be changed in the future?
     * the way we handle esc, returning to main menu, should the inner model handle this how it likes? -> probably
+    * we don't try to handle every case, if someone tries to run this in a window with only 2 lines they gonna have a bad time
+    * a better way to handle window resizes?
+        * right now we have to explicitely pass the size through to every model and update it whenever we create a new model and co
+        * maybe another way is to periodically trigger a windowSizeMsg? can we get the current size somewhere or
 */
 
 func main() {
@@ -65,9 +58,15 @@ type State int
 const (
 	MainMenu State = iota
 	ConfirmGoBack
+	Github
 	BackupDir
 	Zip
-	Inner
+)
+
+const (
+	MainMenuItemGithub    string = "github"
+	MainMenuItemBackupDir string = "backup"
+	MainMenuItemZip       string = "zip"
 )
 
 type Model struct {
@@ -85,14 +84,17 @@ type Model struct {
 
 	zipTextInput  textinput.Model
 	zipInputValid bool
-	zipError      string
-	zipKeyMap     zipKeyMap
 
-	inner tea.Model
+	zipError  string
+	zipKeyMap zipKeyMap
+
+	githubModel *github.Model
 
 	helpView help.Model
 
 	styles Styles
+
+	viewWidth, viewHeight int
 }
 
 func NewModel() Model {
@@ -101,9 +103,9 @@ func NewModel() Model {
 	styles := defaultStyles()
 
 	items := []list.Item{
-		item("github"),
-		item("backup"),
-		item("zip"),
+		item(MainMenuItemGithub),
+		item(MainMenuItemBackupDir),
+		item(MainMenuItemZip),
 	}
 	itemDelegate := &mainMenuItemDelegate{backupDir: backupDir}
 	itemDelegate.itemTitleStyle = styles.NormalTextStyle
@@ -145,7 +147,7 @@ func NewModel() Model {
 		zipInputValid:        true,
 		zipError:             "",
 		zipKeyMap:            defaultZipKeyMap(),
-		inner:                nil,
+		githubModel:          nil,
 		helpView:             helpView,
 		styles:               styles,
 	}
@@ -166,24 +168,36 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// handle global messages
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		case "esc":
-			if m.state != ConfirmGoBack && m.state != MainMenu {
+			if m.state == BackupDir || m.state == Zip {
+				m.setState(MainMenu)
+			} else if m.state == Github {
 				m.setState(ConfirmGoBack)
 			}
 			return m, nil
 		}
 	case tea.WindowSizeMsg:
-		// TODO yes this is what we need, need to do this everywhere we have a list
-		h, _ := m.styles.ViewStyle.GetFrameSize()
-		// m.list.SetSize(msg.Width-h, msg.Height-v)
-		m.mainMenuList.SetSize(msg.Width-h, 9)
-		// TODO forward these to inner?
+		// title takes 2 lines, help takes 3 lines, including empty lines, global margin/padding takes some space
+		// the rest we can use for the list
+		w, h := m.styles.ViewStyle.GetFrameSize()
+		m.viewWidth = msg.Width - w
+		m.viewHeight = msg.Height - h
+		height := msg.Height - h - 5
+		if height > 9 {
+			height = 9
+		}
+		if height < 0 {
+			height = 2
+		}
+		m.mainMenuList.SetSize(msg.Width-w, height)
+		if m.githubModel != nil {
+			m.githubModel.SetSize(m.viewWidth, m.viewHeight)
+		}
 	}
 
 	var cmd tea.Cmd
@@ -195,13 +209,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyMsg:
 			switch msg.String() {
 			case "enter":
-				// TODO disable filtering on list
 				s := string(m.mainMenuList.SelectedItem().(item))
 				switch s {
-				// TODO should have these as constants mainMenuItemGithub
-				case "github":
-					m.setState(Inner)
-					m.inner = github.NewModel(m.backupDir, github.Styles{
+				case MainMenuItemGithub:
+					m.setState(Github)
+					m.githubModel = github.NewModel(m.backupDir, github.Styles{
 						ViewStyle:             m.styles.ViewStyle,
 						TitleStyle:            m.styles.TitleStyle,
 						NormalTextStyle:       m.styles.NormalTextStyle,
@@ -209,18 +221,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						SelectedListItemStyle: m.styles.SelectedListItemStyle,
 						HelpStyles:            m.styles.HelpStyles,
 					})
-					cmd = m.inner.Init()
-				case "backup":
+					m.githubModel.SetSize(m.viewWidth, m.viewHeight)
+					cmd = m.githubModel.Init()
+				case MainMenuItemBackupDir:
 					m.setState(BackupDir)
 					m.backupDirTextInput.Reset()
 					m.backupDirTextInput.Placeholder = m.backupDir
 					m.backupDirTextInput.Focus()
 					m.backupDirInputValid = true
-				case "zip":
+				case MainMenuItemZip:
 					m.setState(Zip)
 					m.zipTextInput.Reset()
 					m.zipTextInput.Focus()
 					m.zipInputValid = true
+					m.zipError = ""
 				}
 				return m, cmd
 			case "?":
@@ -234,8 +248,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyMsg:
 			switch msg.String() {
 			case "y":
+				if m.state == Github {
+					m.githubModel = nil
+				}
 				m.setState(MainMenu)
-				m.inner = nil
 				return m, nil
 			case "n":
 				m.setState(m.lastState)
@@ -248,7 +264,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyMsg:
 			switch msg.String() {
 			case "enter":
-				// TODO check if valid
 				dir := m.backupDirTextInput.Value()
 				if dir == "" {
 					m.backupDirInputValid = false
@@ -288,8 +303,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.zipTextInput, cmd = m.zipTextInput.Update(msg)
-	case Inner:
-		m.inner, cmd = m.inner.Update(msg)
+	case Github:
+		_, cmd = m.githubModel.Update(msg)
 	}
 
 	return m, cmd
@@ -308,8 +323,10 @@ func (m Model) View() string {
 		)
 	case ConfirmGoBack:
 		content = fmt.Sprintf(
-			"%s\n",
-			m.styles.NormalTextStyle.Render("Do you want to return to the main menu? <y> to confirm, <n> to cancel"),
+			"%s\n\n%s\n\n%s\n",
+			m.styles.TitleStyle.Render("Backup"),
+			m.styles.NormalTextStyle.Render("Do you want to return to the main menu?"),
+			m.styles.NormalTextStyle.Render("<y> to confirm, <n> to cancel"),
 		)
 	case BackupDir:
 		content = fmt.Sprintf(
@@ -333,8 +350,8 @@ func (m Model) View() string {
 			content = fmt.Sprintf("%s%s\n\n", content, m.styles.ErrorTextStyle.Render(m.zipError))
 		}
 		content = fmt.Sprintf("%s%s\n", content, m.helpView.View(m.zipKeyMap))
-	case Inner:
-		content = m.inner.View()
+	case Github:
+		content = m.githubModel.View()
 	}
 	return m.styles.ViewStyle.Render(content)
 }
@@ -358,21 +375,23 @@ type zipResult struct {
 }
 
 func zip(dir string, file string) tea.Cmd {
-	return func() tea.Msg {
-		c := exec.Command("sh", "-c", fmt.Sprintf("zip -r %s %s", file, dir))
-		return tea.ExecProcess(c, func(err error) tea.Msg {
-			return zipResult{err: err}
-		})()
-	}
+	cmd := exec.Command("sh", "-c", fmt.Sprintf("zip -r %s %s", file, dir))
+	// note that zip prints errors to stdout
+	return bexec.Exec(cmd, func(err error, s string) tea.Msg {
+		if err != nil {
+			s = strings.TrimSpace(s)
+			e := fmt.Errorf("%v: %v", err, s)
+			return zipResult{err: e}
+		}
+		return zipResult{err: nil}
+	}, true)
 }
 
 type mainMenuKeyMap struct {
 	CursorUp   key.Binding
 	CursorDown key.Binding
-	// ShowFullHelp  key.Binding
-	// CloseFullHelp key.Binding
-	Select key.Binding
-	Exit   key.Binding
+	Select     key.Binding
+	Exit       key.Binding
 }
 
 func defaultMainMenuKeyMap() mainMenuKeyMap {
@@ -385,14 +404,6 @@ func defaultMainMenuKeyMap() mainMenuKeyMap {
 			key.WithKeys("j"),
 			key.WithHelp("j", "down"),
 		),
-		// ShowFullHelp: key.NewBinding(
-		// 	key.WithKeys("?"),
-		// 	key.WithHelp("?", "more"),
-		// ),
-		// CloseFullHelp: key.NewBinding(
-		// 	key.WithKeys("?"),
-		// 	key.WithHelp("?", "less"),
-		// ),
 		Select: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "select"),
@@ -516,13 +527,13 @@ func (d mainMenuItemDelegate) Render(w io.Writer, m list.Model, index int, listI
 	var description string
 
 	switch item {
-	case "github":
+	case MainMenuItemGithub:
 		title = "GitHub"
 		description = "Backup your repos"
-	case "backup":
+	case MainMenuItemBackupDir:
 		title = "Change Backup Directory"
 		description = d.backupDir
-	case "zip":
+	case MainMenuItemZip:
 		title = "Zip"
 		description = "Zip Backup Directory"
 	default:
@@ -548,15 +559,14 @@ type Styles struct {
 
 func defaultStyles() Styles {
 	// copied these styles from the charmbracelet/bubbles/help package
-	// TODO change these a bit
 	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{
 		Light: "#909090",
-		Dark:  "#626262",
+		Dark:  "#828282",
 	})
 
 	descStyle := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{
 		Light: "#B2B2B2",
-		Dark:  "#4A4A4A",
+		Dark:  "#626262",
 	})
 
 	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{

@@ -1,21 +1,19 @@
 package github
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os/exec"
 	"path/filepath"
+	"time"
+
+	bexec "backup/exec"
 
 	"github.com/charmbracelet/bubbles/help"
 	tea "github.com/charmbracelet/bubbletea"
 )
-
-/*
-TODO
-* could make view code a bit more dry by setting title/helpView globally and just return the content from methods
-*/
 
 type State int
 
@@ -64,14 +62,16 @@ type Model struct {
 	helpView help.Model
 
 	styles Styles
+
+	viewWidth, viewHeight int
 }
 
-func NewModel(backupRoot string, styles Styles) Model {
+func NewModel(backupRoot string, styles Styles) *Model {
 	helpView := help.New()
 	helpView.Styles = styles.HelpStyles
 	helpView.ShowAll = true
 
-	return Model{
+	return &Model{
 		state:                Authenticating,
 		authenticationStatus: "",
 		authenticationError:  nil,
@@ -94,11 +94,11 @@ func NewModel(backupRoot string, styles Styles) Model {
 	}
 }
 
-func (m Model) Init() tea.Cmd {
+func (m *Model) Init() tea.Cmd {
 	return checkAuthentication()
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch m.state {
@@ -163,6 +163,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.repos = msg.repos
 				m.loadingReposError = nil
 				m.reposList = NewList(m.repos, m.reposLoadedKeyMap.listKeyMap())
+				m.setListSize()
 				m.validationError = ""
 			} else {
 				m.state = LoadingReposError
@@ -225,6 +226,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *Model) SetSize(w, h int) {
+	m.viewWidth = w
+	m.viewHeight = h
+	m.setListSize()
+}
+
+func (m *Model) setListSize() {
+	if m.reposList != nil {
+		// use 4 lines for title and text and 4 lines for help text, plus 2 empty lines
+		height := m.viewHeight - 10
+		if height < 2 {
+			height = 2
+		}
+		if height > 15 {
+			height = 15
+		}
+		m.reposList.SetSize(m.viewWidth, height)
+	}
+}
+
 type authenticationResult struct {
 	status string
 	err    error
@@ -232,7 +253,9 @@ type authenticationResult struct {
 
 func checkAuthentication() tea.Cmd {
 	return func() tea.Msg {
-		c := exec.Command("gh", "auth", "status", "-h", "github.com")
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+		defer cancel()
+		c := exec.CommandContext(ctx, "gh", "auth", "status", "-h", "github.com")
 		out, err := c.CombinedOutput()
 		if err != nil {
 			return authenticationResult{err: fmt.Errorf("Not authenticated: %v", string(out))}
@@ -246,23 +269,27 @@ type loginResult struct {
 }
 
 func login() tea.Cmd {
-	return func() tea.Msg {
-		c := exec.Command("gh", "auth", "login")
-		return tea.ExecProcess(c, func(err error) tea.Msg {
-			log.Println(err)
-			return loginResult{err: err}
-		})()
-	}
+	// interactive, don't use context with timeout here
+	cmd := exec.Command("gh", "auth", "login")
+	return bexec.Exec(cmd, func(err error, s string) tea.Msg {
+		if err != nil {
+			e := fmt.Errorf("%v: %v", err, s)
+			return loginResult{err: e}
+		}
+		return loginResult{err: nil}
+	}, false)
 }
 
 func switchUser() tea.Cmd {
-	return func() tea.Msg {
-		c := exec.Command("gh", "auth", "switch")
-		return tea.ExecProcess(c, func(err error) tea.Msg {
-			log.Println(err)
-			return loginResult{err: err}
-		})()
-	}
+	// interactive, don't use context with timeout here
+	cmd := exec.Command("gh", "auth", "switch")
+	return bexec.Exec(cmd, func(err error, s string) tea.Msg {
+		if err != nil {
+			e := fmt.Errorf("%v: %v", err, s)
+			return loginResult{err: e}
+		}
+		return loginResult{err: nil}
+	}, false)
 }
 
 type loadReposResult struct {
@@ -270,20 +297,15 @@ type loadReposResult struct {
 	err   error
 }
 
-// TODO can use "gh repo list dkinzler --json "name,id,url""
-// we can run a exec.Cmd directly to get the output and parse it as json
-// we also want to read the status code of the command to see if the output was valid?
-// can then do classic json parsing
-// can we unmarshal into a []Repo?
-// TODO use CommandContext? to cancel the process after a certain time?
 func loadRepos() tea.Cmd {
 	return func() tea.Msg {
-		// TODO add argument here to increase max num of results
-		cmd := exec.Command("gh", "repo", "list", "--json", "id,name,nameWithOwner,url")
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "gh", "repo", "list", "--limit", "200", "--json", "id,name,nameWithOwner,url")
 
-		out, err := cmd.Output()
+		out, err := cmd.CombinedOutput()
 		if err != nil {
-			return loadReposResult{repos: nil, err: errors.New("could not load repos")}
+			return loadReposResult{repos: nil, err: fmt.Errorf("could not load repos: %s", out)}
 		}
 
 		var repos []Repo
@@ -306,8 +328,10 @@ type cloneRepoResult struct {
 
 func cloneRepo(repo Repo, dir string) tea.Cmd {
 	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+		defer cancel()
 		// run the command through sh, otherwise e.g. ~ in the path won't get expanded
-		cmd := exec.Command("sh", "-c", fmt.Sprintf("gh repo clone %s %s", repo.Url, filepath.Join(dir, repo.Name)))
+		cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("gh repo clone %s %s", repo.Url, filepath.Join(dir, repo.Name)))
 
 		err := cmd.Run()
 		return cloneRepoResult{id: repo.Id, err: err}

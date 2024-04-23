@@ -22,7 +22,6 @@ import (
 
 /*
 TODO
-* retry cloning?
 * testing
     * think a bit about testing and how to do it
     * we could create a model and feed it articial events and see what commands and new state it returns?
@@ -207,8 +206,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case MainMenu:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
-			switch msg.String() {
-			case "enter":
+			switch {
+			case key.Matches(msg, m.mainMenuKeyMap.Select):
 				s := string(m.mainMenuList.SelectedItem().(item))
 				switch s {
 				case MainMenuItemGithub:
@@ -237,8 +236,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.zipError = ""
 				}
 				return m, cmd
-			case "?":
-				m.helpView.ShowAll = !m.helpView.ShowAll
 			}
 		}
 		m.mainMenuList, cmd = m.mainMenuList.Update(msg)
@@ -246,14 +243,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ConfirmGoBack:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
-			switch msg.String() {
-			case "y":
+			switch {
+			case key.Matches(msg, m.mainMenuKeyMap.ConfirmYes):
 				if m.state == Github {
 					m.githubModel = nil
 				}
 				m.setState(MainMenu)
 				return m, nil
-			case "n":
+			case key.Matches(msg, m.mainMenuKeyMap.ConfirmNo):
 				m.setState(m.lastState)
 				return m, nil
 			}
@@ -262,8 +259,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case BackupDir:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
-			switch msg.String() {
-			case "enter":
+			switch {
+			case key.Matches(msg, m.backupDirKeyMap.Confirm):
 				dir := m.backupDirTextInput.Value()
 				if dir == "" {
 					m.backupDirInputValid = false
@@ -281,8 +278,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case Zip:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
-			switch msg.String() {
-			case "enter":
+			switch {
+			case key.Matches(msg, m.zipKeyMap.Confirm):
 				file := m.zipTextInput.Value()
 				if file == "" {
 					m.zipInputValid = false
@@ -392,6 +389,8 @@ type mainMenuKeyMap struct {
 	CursorDown key.Binding
 	Select     key.Binding
 	Exit       key.Binding
+	ConfirmYes key.Binding
+	ConfirmNo  key.Binding
 }
 
 func defaultMainMenuKeyMap() mainMenuKeyMap {
@@ -411,6 +410,12 @@ func defaultMainMenuKeyMap() mainMenuKeyMap {
 		Exit: key.NewBinding(
 			key.WithKeys("q"),
 			key.WithHelp("q", "quit"),
+		),
+		ConfirmYes: key.NewBinding(
+			key.WithKeys("y"),
+		),
+		ConfirmNo: key.NewBinding(
+			key.WithKeys("n"),
 		),
 	}
 }

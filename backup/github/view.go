@@ -142,7 +142,6 @@ func (m *Model) viewReposCloned() string {
 			s += fmt.Sprintf("%s  %s\n", repo.NameWithOwner, cross)
 		}
 	}
-	s += fmt.Sprintf("%s  %s\n", "cross/test", cross)
 
 	return fmt.Sprintf(
 		"%s\n\n%s\n\n%s\n\n%s\n",
@@ -304,6 +303,7 @@ func (m reposLoadedKeyMap) FullHelp() [][]key.Binding {
 
 type reposClonedKeyMap struct {
 	Return key.Binding
+	Retry  key.Binding
 }
 
 func defaultReposClonedKeyMap() reposClonedKeyMap {
@@ -312,17 +312,21 @@ func defaultReposClonedKeyMap() reposClonedKeyMap {
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "return to main menu"),
 		),
+		Retry: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "retry failed"),
+		),
 	}
 }
 
 func (m reposClonedKeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{
-		m.Return,
+		m.Return, m.Retry,
 	}
 }
 
 func (m reposClonedKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{m.Return},
+		{m.Return, m.Retry},
 	}
 }

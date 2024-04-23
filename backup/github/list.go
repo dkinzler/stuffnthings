@@ -3,8 +3,8 @@ package github
 import (
 	"fmt"
 	"io"
-	"log"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -14,9 +14,10 @@ type List struct {
 	repos             []Repo
 	reposList         list.Model
 	reposListDelegate *itemDelegate
+	keyMap            reposLoadedKeyMap
 }
 
-func NewList(repos []Repo, keyMap list.KeyMap) *List {
+func NewList(repos []Repo, keyMap reposLoadedKeyMap) *List {
 	items := make([]list.Item, len(repos))
 	for i, r := range repos {
 		items[i] = r
@@ -33,12 +34,13 @@ func NewList(repos []Repo, keyMap list.KeyMap) *List {
 	reposList.SetShowStatusBar(false)
 	reposList.SetShowPagination(true)
 	reposList.SetShowTitle(false)
-	reposList.KeyMap = keyMap
+	reposList.KeyMap = keyMap.listKeyMap()
 
 	return &List{
 		repos:             repos,
 		reposList:         reposList,
 		reposListDelegate: reposListDelegate,
+		keyMap:            keyMap,
 	}
 }
 
@@ -47,11 +49,10 @@ func (l *List) Update(msg tea.Msg) tea.Cmd {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case " ":
+		switch {
+		case key.Matches(msg, l.keyMap.Select):
 			repo, ok := l.reposList.SelectedItem().(Repo)
 			if ok {
-				log.Println("select", len(l.reposListDelegate.Selected))
 				_, selected := l.reposListDelegate.Selected[repo.Id]
 				if selected {
 					delete(l.reposListDelegate.Selected, repo.Id)
@@ -59,14 +60,12 @@ func (l *List) Update(msg tea.Msg) tea.Cmd {
 					l.reposListDelegate.Selected[repo.Id] = struct{}{}
 				}
 			}
-		case "a":
+		case key.Matches(msg, l.keyMap.SelectAll):
 			if len(l.reposListDelegate.Selected) > 0 {
 				// unselect all
-				log.Println("unselect all", l.reposListDelegate.Selected)
 				l.reposListDelegate.Selected = map[string]struct{}{}
 			} else {
 				// select all
-				log.Println("select all", l.reposListDelegate.Selected)
 				for _, repo := range l.repos {
 					l.reposListDelegate.Selected[repo.Id] = struct{}{}
 				}

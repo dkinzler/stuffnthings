@@ -12,6 +12,7 @@ import (
 	bexec "backup/exec"
 
 	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -50,7 +51,8 @@ type Model struct {
 
 	reposToClone []Repo
 
-	cloneResult map[string]bool
+	cloneResult  map[string]bool
+	clonesFailed int
 
 	backupDir string
 
@@ -82,6 +84,7 @@ func NewModel(backupRoot string, styles Styles) *Model {
 		validationError:      "",
 		reposToClone:         nil,
 		cloneResult:          map[string]bool{},
+		clonesFailed:         0,
 		backupDir:            filepath.Join(backupRoot, "github"),
 
 		errorKeyMap:         defaultErrorKeyMap(),
@@ -123,8 +126,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AuthenticationError:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
-			key := msg.String()
-			if key == "enter" {
+			if key.Matches(msg, m.errorKeyMap.Retry) {
 				m.state = Authenticating
 				m.authenticationError = nil
 				cmd = login()
@@ -134,19 +136,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case Authenticated:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
-			switch msg.String() {
-			case "enter":
+			switch {
+			case key.Matches(msg, m.authenticatedKeyMap.Continue):
 				m.state = LoadingRepos
 				m.repos = nil
 				m.loadingReposError = nil
 				cmd = loadRepos()
-			case "l":
+			case key.Matches(msg, m.authenticatedKeyMap.Login):
 				m.state = Authenticating
 				m.authenticationStatus = ""
 				m.authenticationError = nil
 				m.loginError = nil
 				cmd = login()
-			case "s":
+			case key.Matches(msg, m.authenticatedKeyMap.Switch):
 				m.state = Authenticating
 				m.authenticationStatus = ""
 				m.authenticationError = nil
@@ -162,7 +164,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = ReposLoaded
 				m.repos = msg.repos
 				m.loadingReposError = nil
-				m.reposList = NewList(m.repos, m.reposLoadedKeyMap.listKeyMap())
+				m.reposList = NewList(m.repos, m.reposLoadedKeyMap)
 				m.setListSize()
 				m.validationError = ""
 			} else {
@@ -175,8 +177,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case LoadingReposError:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
-			switch msg.String() {
-			case "enter":
+			switch {
+			case key.Matches(msg, m.errorKeyMap.Retry):
 				m.state = LoadingRepos
 				m.repos = nil
 				m.loadingReposError = nil
@@ -187,13 +189,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ReposLoaded:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
-			switch msg.String() {
-			case "enter":
-				m.reposToClone = m.reposList.Selected()
-				if len(m.reposToClone) == 0 {
+			switch {
+			case key.Matches(msg, m.reposLoadedKeyMap.Continue):
+				reposToClone := m.reposList.Selected()
+				if len(reposToClone) == 0 {
 					m.validationError = "No repos selected"
 				} else {
 					m.state = CloningRepos
+					m.reposToClone = reposToClone
+					m.cloneResult = map[string]bool{}
+					m.clonesFailed = 0
 					m.validationError = ""
 					var cmds []tea.Cmd
 					for _, r := range m.reposToClone {
@@ -214,14 +219,37 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cloneResult[msg.id] = true
 			} else {
 				m.cloneResult[msg.id] = false
+				m.clonesFailed += 1
 			}
 
 			if len(m.cloneResult) == len(m.reposToClone) {
 				m.state = ReposCloned
+				if m.clonesFailed > 0 {
+					m.reposClonedKeyMap.Retry.SetEnabled(true)
+				} else {
+					m.reposClonedKeyMap.Retry.SetEnabled(false)
+				}
 			}
 		}
 
 	case ReposCloned:
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			if key.Matches(msg, m.reposClonedKeyMap.Retry) {
+				if m.clonesFailed > 0 {
+					var cmds []tea.Cmd
+					for _, r := range m.reposToClone {
+						if success, ok := m.cloneResult[r.Id]; ok && !success {
+							delete(m.cloneResult, r.Id)
+							cmds = append(cmds, cloneRepo(r, m.backupDir))
+						}
+					}
+					cmd = tea.Batch(cmds...)
+					m.state = CloningRepos
+					m.clonesFailed = 0
+				}
+			}
+		}
 	}
 	return m, cmd
 }

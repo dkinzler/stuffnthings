@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -66,6 +67,8 @@ type Model struct {
 	styles Styles
 
 	viewWidth, viewHeight int
+
+	spinner spinner.Model
 }
 
 func NewModel(backupRoot string, styles Styles) *Model {
@@ -94,6 +97,10 @@ func NewModel(backupRoot string, styles Styles) *Model {
 
 		styles:   styles,
 		helpView: helpView,
+		spinner: spinner.New(
+			spinner.WithSpinner(spinner.Dot),
+			spinner.WithStyle(styles.SelectedListItemStyle),
+		),
 	}
 }
 
@@ -204,6 +211,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					for _, r := range m.reposToClone {
 						cmds = append(cmds, cloneRepo(r, m.backupDir))
 					}
+					cmds = append(cmds, m.spinner.Tick)
 					cmd = tea.Batch(cmds...)
 				}
 			default:
@@ -230,6 +238,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.reposClonedKeyMap.Retry.SetEnabled(false)
 				}
 			}
+		case spinner.TickMsg:
+			m.spinner, cmd = m.spinner.Update(msg)
 		}
 
 	case ReposCloned:
@@ -356,12 +366,14 @@ type cloneRepoResult struct {
 
 func cloneRepo(repo Repo, dir string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-		defer cancel()
-		// run the command through sh, otherwise e.g. ~ in the path won't get expanded
-		cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("gh repo clone %s %s", repo.Url, filepath.Join(dir, repo.Name)))
-
-		err := cmd.Run()
-		return cloneRepoResult{id: repo.Id, err: err}
+		time.Sleep(10 * time.Second)
+		return cloneRepoResult{id: repo.Id, err: nil}
+		// ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+		// defer cancel()
+		// // run the command through sh, otherwise e.g. ~ in the path won't get expanded
+		// cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("gh repo clone %s %s", repo.Url, filepath.Join(dir, repo.Name)))
+		//
+		// err := cmd.Run()
+		// return cloneRepoResult{id: repo.Id, err: err}
 	}
 }

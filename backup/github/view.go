@@ -123,9 +123,10 @@ func (m *Model) viewCloningRepos() string {
 	}
 
 	return fmt.Sprintf(
-		"%s\n\n%s\n\n%s\n",
+		"%s\n\n%s %s\n\n%s\n",
 		m.styles.TitleStyle.Render("GitHub"),
 		m.styles.NormalTextStyle.Render("Cloning Repos"),
+		m.spinner.View(),
 		m.styles.NormalTextStyle.Render(s),
 	)
 }

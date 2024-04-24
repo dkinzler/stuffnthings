@@ -22,19 +22,10 @@ import (
 
 /*
 TODO
-* testing
-    * think a bit about testing and how to do it
-    * we could create a model and feed it articial events and see what commands and new state it returns?
-    * i.e. just testing the state machine
+* check stuff again
 * optional
     * mainMenuKeyMap, backupDirKeyMap and zipKeyMap all through a single type with functions that return a keymap?
         * how could this be done?
-* what could be changed in the future?
-    * the way we handle esc, returning to main menu, should the inner model handle this how it likes? -> probably
-    * we don't try to handle every case, if someone tries to run this in a window with only 2 lines they gonna have a bad time
-    * a better way to handle window resizes?
-        * right now we have to explicitely pass the size through to every model and update it whenever we create a new model and co
-        * maybe another way is to periodically trigger a windowSizeMsg? can we get the current size somewhere or
 */
 
 func main() {

@@ -1,28 +1,33 @@
 package main
 
 import (
-	bexec "backup/exec"
+	"backup/config/backupdir"
 	"backup/github"
+	"backup/styles"
+	"backup/zip"
 	"fmt"
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
 /*
 TODO
-* check stuff again
+* final refactor
+    * and in the main menu ui we could have an extra heading in the list for "Configuration" at the bottom
+    * split main.go, move model to a file named model.go
+        * in main file start the program and maybe take cli parameters, one for the log file
+* what did we learn from this project?
+    * working iteratively is good
+    * even if something isn't the best design up front, keep going and make it work quickly, then you usually have the knowledge to refactor into a better design
 * optional
     * mainMenuKeyMap, backupDirKeyMap and zipKeyMap all through a single type with functions that return a keymap?
         * how could this be done?
@@ -47,7 +52,6 @@ type State int
 
 const (
 	MainMenu State = iota
-	ConfirmGoBack
 	Github
 	BackupDir
 	Zip
@@ -60,37 +64,31 @@ const (
 )
 
 type Model struct {
-	lastState State
-	state     State
+	state State
 
 	mainMenuList         list.Model
 	mainMenuItemDelegate *mainMenuItemDelegate
-	mainMenuKeyMap       mainMenuKeyMap
 
-	backupDirTextInput  textinput.Model
-	backupDirInputValid bool
-	backupDir           string
-	backupDirKeyMap     backupDirKeyMap
+	backupDir      string
+	backupDirModel *backupdir.Model
 
-	zipTextInput  textinput.Model
-	zipInputValid bool
-
-	zipError  string
-	zipKeyMap zipKeyMap
+	zipModel *zip.Model
 
 	githubModel *github.Model
 
-	helpView help.Model
+	keyMap keyMap
 
-	styles Styles
+	help help.Model
+
+	styles styles.Styles
 
 	viewWidth, viewHeight int
 }
 
 func NewModel() Model {
-	keyMap := defaultMainMenuKeyMap()
+	keyMap := defaultKeyMap()
 	backupDir := defaultBackupDir()
-	styles := defaultStyles()
+	styles := styles.DefaultStyles()
 
 	items := []list.Item{
 		item(MainMenuItemGithub),
@@ -110,35 +108,20 @@ func NewModel() Model {
 	list.SetShowTitle(false)
 	list.KeyMap = keyMap.listKeyMap()
 
-	bt := textinput.New()
-	bt.Placeholder = backupDir
-	bt.CharLimit = 250
-	bt.Width = 40
-
-	zt := textinput.New()
-	zt.CharLimit = 250
-	zt.Width = 40
-
 	helpView := help.New()
 	helpView.Styles = styles.HelpStyles
 	helpView.ShowAll = true
 
 	return Model{
-		lastState:            MainMenu,
 		state:                MainMenu,
 		mainMenuList:         list,
 		mainMenuItemDelegate: itemDelegate,
-		mainMenuKeyMap:       keyMap,
-		backupDirTextInput:   bt,
-		backupDirInputValid:  true,
+		keyMap:               keyMap,
 		backupDir:            backupDir,
-		backupDirKeyMap:      defaultBackupDirKeyMap(),
-		zipTextInput:         zt,
-		zipInputValid:        true,
-		zipError:             "",
-		zipKeyMap:            defaultZipKeyMap(),
+		backupDirModel:       nil,
+		zipModel:             nil,
 		githubModel:          nil,
-		helpView:             helpView,
+		help:                 helpView,
 		styles:               styles,
 	}
 }
@@ -146,11 +129,6 @@ func NewModel() Model {
 func defaultBackupDir() string {
 	date := time.Now().Format(time.DateOnly)
 	return filepath.Join("~/backup", date)
-}
-
-func (m *Model) setState(state State) {
-	m.lastState = m.state
-	m.state = state
 }
 
 func (m Model) Init() tea.Cmd {
@@ -163,13 +141,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
-		case "esc":
-			if m.state == BackupDir || m.state == Zip {
-				m.setState(MainMenu)
-			} else if m.state == Github {
-				m.setState(ConfirmGoBack)
-			}
-			return m, nil
 		}
 	case tea.WindowSizeMsg:
 		// title takes 2 lines, help takes 3 lines, including empty lines, global margin/padding takes some space
@@ -198,103 +169,58 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch {
-			case key.Matches(msg, m.mainMenuKeyMap.Select):
+			case key.Matches(msg, m.keyMap.Select):
 				s := string(m.mainMenuList.SelectedItem().(item))
 				switch s {
 				case MainMenuItemGithub:
-					m.setState(Github)
-					m.githubModel = github.NewModel(m.backupDir, github.Styles{
-						ViewStyle:             m.styles.ViewStyle,
-						TitleStyle:            m.styles.TitleStyle,
-						NormalTextStyle:       m.styles.NormalTextStyle,
-						ErrorTextStyle:        m.styles.ErrorTextStyle,
-						SelectedListItemStyle: m.styles.SelectedListItemStyle,
-						HelpStyles:            m.styles.HelpStyles,
-					})
+					m.state = Github
+					m.githubModel = github.NewModel(m.backupDir, m.styles)
 					m.githubModel.SetSize(m.viewWidth, m.viewHeight)
 					cmd = m.githubModel.Init()
 				case MainMenuItemBackupDir:
-					m.setState(BackupDir)
-					m.backupDirTextInput.Reset()
-					m.backupDirTextInput.Placeholder = m.backupDir
-					m.backupDirTextInput.Focus()
-					m.backupDirInputValid = true
+					m.state = BackupDir
+					m.backupDirModel = backupdir.NewModel(m.backupDir, m.styles)
+					cmd = m.backupDirModel.Init()
 				case MainMenuItemZip:
-					m.setState(Zip)
-					m.zipTextInput.Reset()
-					m.zipTextInput.Focus()
-					m.zipInputValid = true
-					m.zipError = ""
+					m.state = Zip
+					m.zipModel = zip.NewModel(m.backupDir, m.styles)
+					cmd = m.zipModel.Init()
 				}
 				return m, cmd
 			}
 		}
 		m.mainMenuList, cmd = m.mainMenuList.Update(msg)
 
-	case ConfirmGoBack:
-		switch msg := msg.(type) {
-		case tea.KeyMsg:
-			switch {
-			case key.Matches(msg, m.mainMenuKeyMap.ConfirmYes):
-				if m.state == Github {
-					m.githubModel = nil
-				}
-				m.setState(MainMenu)
-				return m, nil
-			case key.Matches(msg, m.mainMenuKeyMap.ConfirmNo):
-				m.setState(m.lastState)
-				return m, nil
-			}
-		}
-
 	case BackupDir:
 		switch msg := msg.(type) {
-		case tea.KeyMsg:
-			switch {
-			case key.Matches(msg, m.backupDirKeyMap.Confirm):
-				dir := m.backupDirTextInput.Value()
-				if dir == "" {
-					m.backupDirInputValid = false
-				} else {
-					m.backupDir = dir
-					m.mainMenuItemDelegate.backupDir = dir
-					m.backupDirTextInput.Reset()
-					m.backupDirInputValid = true
-					m.setState(MainMenu)
-				}
-				return m, cmd
-			}
+		case backupdir.BackupDirChanged:
+			m.backupDir = msg.BackupDir
+			m.mainMenuItemDelegate.backupDir = m.backupDir
+			m.backupDirModel = nil
+			m.state = MainMenu
+		case backupdir.Done:
+			m.backupDirModel = nil
+			m.state = MainMenu
+		default:
+			_, cmd = m.backupDirModel.Update(msg)
 		}
-		m.backupDirTextInput, cmd = m.backupDirTextInput.Update(msg)
 	case Zip:
 		switch msg := msg.(type) {
-		case tea.KeyMsg:
-			switch {
-			case key.Matches(msg, m.zipKeyMap.Confirm):
-				file := m.zipTextInput.Value()
-				if file == "" {
-					m.zipInputValid = false
-				} else {
-					m.zipInputValid = true
-					cmd = zip(m.backupDir, file)
-				}
-				return m, cmd
-			}
-		case zipResult:
-			if msg.err == nil {
-				m.zipError = ""
-				m.zipTextInput.Reset()
-				m.setState(MainMenu)
-				return m, cmd
-			} else {
-				m.zipError = msg.err.Error()
-			}
+		case zip.Done:
+			m.zipModel = nil
+			m.state = MainMenu
+		default:
+			_, cmd = m.zipModel.Update(msg)
 		}
-		m.zipTextInput, cmd = m.zipTextInput.Update(msg)
 	case Github:
-		_, cmd = m.githubModel.Update(msg)
+		switch msg := msg.(type) {
+		case github.Done:
+			m.githubModel = nil
+			m.state = MainMenu
+		default:
+			_, cmd = m.githubModel.Update(msg)
+		}
 	}
-
 	return m, cmd
 }
 
@@ -307,37 +233,12 @@ func (m Model) View() string {
 			"%s\n\n%s\n\n%s\n",
 			m.styles.TitleStyle.Render("Backup"),
 			m.mainMenuList.View(),
-			m.helpView.View(m.mainMenuKeyMap),
-		)
-	case ConfirmGoBack:
-		content = fmt.Sprintf(
-			"%s\n\n%s\n\n%s\n",
-			m.styles.TitleStyle.Render("Backup"),
-			m.styles.NormalTextStyle.Render("Do you want to return to the main menu?"),
-			m.styles.NormalTextStyle.Render("<y> to confirm, <n> to cancel"),
+			m.help.View(m.keyMap),
 		)
 	case BackupDir:
-		content = fmt.Sprintf(
-			"%s\n\n%s\n\n",
-			m.styles.TitleStyle.Render("Change Backup Directory"),
-			m.backupDirTextInput.View(),
-		)
-		if !m.backupDirInputValid {
-			content = fmt.Sprintf("%s%s\n\n", content, m.styles.ErrorTextStyle.Render("invalid directory"))
-		}
-		content = fmt.Sprintf("%s%s\n", content, m.helpView.View(m.backupDirKeyMap))
+		content = m.backupDirModel.View()
 	case Zip:
-		content = fmt.Sprintf(
-			"%s\n\n%s\n\n",
-			m.styles.TitleStyle.Render("Zip Backup Directory"),
-			m.zipTextInput.View(),
-		)
-		if !m.zipInputValid {
-			content = fmt.Sprintf("%s%s\n\n", content, m.styles.ErrorTextStyle.Render("invalid filename"))
-		} else if m.zipError != "" {
-			content = fmt.Sprintf("%s%s\n\n", content, m.styles.ErrorTextStyle.Render(m.zipError))
-		}
-		content = fmt.Sprintf("%s%s\n", content, m.helpView.View(m.zipKeyMap))
+		content = m.zipModel.View()
 	case Github:
 		content = m.githubModel.View()
 	}
@@ -358,34 +259,15 @@ func (i item) Description() string {
 	return ""
 }
 
-type zipResult struct {
-	err error
-}
-
-func zip(dir string, file string) tea.Cmd {
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("zip -r %s %s", file, dir))
-	// note that zip prints errors to stdout
-	return bexec.Exec(cmd, func(err error, s string) tea.Msg {
-		if err != nil {
-			s = strings.TrimSpace(s)
-			e := fmt.Errorf("%v: %v", err, s)
-			return zipResult{err: e}
-		}
-		return zipResult{err: nil}
-	}, true)
-}
-
-type mainMenuKeyMap struct {
+type keyMap struct {
 	CursorUp   key.Binding
 	CursorDown key.Binding
 	Select     key.Binding
 	Exit       key.Binding
-	ConfirmYes key.Binding
-	ConfirmNo  key.Binding
 }
 
-func defaultMainMenuKeyMap() mainMenuKeyMap {
-	return mainMenuKeyMap{
+func defaultKeyMap() keyMap {
+	return keyMap{
 		CursorUp: key.NewBinding(
 			key.WithKeys("k"),
 			key.WithHelp("k", "up"),
@@ -402,16 +284,10 @@ func defaultMainMenuKeyMap() mainMenuKeyMap {
 			key.WithKeys("q"),
 			key.WithHelp("q", "quit"),
 		),
-		ConfirmYes: key.NewBinding(
-			key.WithKeys("y"),
-		),
-		ConfirmNo: key.NewBinding(
-			key.WithKeys("n"),
-		),
 	}
 }
 
-func (m mainMenuKeyMap) listKeyMap() list.KeyMap {
+func (m keyMap) listKeyMap() list.KeyMap {
 	return list.KeyMap{
 		CursorUp:             m.CursorUp,
 		CursorDown:           m.CursorDown,
@@ -428,7 +304,7 @@ func (m mainMenuKeyMap) listKeyMap() list.KeyMap {
 	}
 }
 
-func (m mainMenuKeyMap) ShortHelp() []key.Binding {
+func (m keyMap) ShortHelp() []key.Binding {
 	return []key.Binding{
 		m.CursorUp,
 		m.CursorDown,
@@ -437,63 +313,11 @@ func (m mainMenuKeyMap) ShortHelp() []key.Binding {
 	}
 }
 
-func (m mainMenuKeyMap) FullHelp() [][]key.Binding {
+func (m keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{m.CursorUp, m.CursorDown},
 		{m.Select, m.Exit},
 	}
-}
-
-type backupDirKeyMap struct {
-	Confirm key.Binding
-	Cancel  key.Binding
-}
-
-func defaultBackupDirKeyMap() backupDirKeyMap {
-	return backupDirKeyMap{
-		Confirm: key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "confirm"),
-		),
-		Cancel: key.NewBinding(
-			key.WithKeys("esc"),
-			key.WithHelp("esc", "cancel"),
-		),
-	}
-}
-
-func (m backupDirKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{m.Cancel, m.Confirm}
-}
-
-func (m backupDirKeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{m.Cancel}, {m.Confirm}}
-}
-
-type zipKeyMap struct {
-	Confirm key.Binding
-	Cancel  key.Binding
-}
-
-func defaultZipKeyMap() zipKeyMap {
-	return zipKeyMap{
-		Confirm: key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "confirm"),
-		),
-		Cancel: key.NewBinding(
-			key.WithKeys("esc"),
-			key.WithHelp("esc", "cancel"),
-		),
-	}
-}
-
-func (m zipKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{m.Cancel, m.Confirm}
-}
-
-func (m zipKeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{m.Cancel}, {m.Confirm}}
 }
 
 type mainMenuItemDelegate struct {
@@ -542,49 +366,4 @@ func (d mainMenuItemDelegate) Render(w io.Writer, m list.Model, index int, listI
 	}
 
 	fmt.Fprintf(w, s)
-}
-
-type Styles struct {
-	ViewStyle             lipgloss.Style
-	TitleStyle            lipgloss.Style
-	NormalTextStyle       lipgloss.Style
-	ErrorTextStyle        lipgloss.Style
-	SelectedListItemStyle lipgloss.Style
-	HelpStyles            help.Styles
-}
-
-func defaultStyles() Styles {
-	// copied these styles from the charmbracelet/bubbles/help package
-	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{
-		Light: "#909090",
-		Dark:  "#828282",
-	})
-
-	descStyle := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{
-		Light: "#B2B2B2",
-		Dark:  "#626262",
-	})
-
-	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{
-		Light: "#DDDADA",
-		Dark:  "#3C3C3C",
-	})
-	helpStyles := help.Styles{
-		Ellipsis:       sepStyle,
-		ShortKey:       keyStyle,
-		ShortDesc:      descStyle,
-		ShortSeparator: sepStyle,
-		FullKey:        keyStyle,
-		FullDesc:       descStyle,
-		FullSeparator:  sepStyle,
-	}
-
-	return Styles{
-		ViewStyle:             lipgloss.NewStyle().Margin(1),
-		TitleStyle:            lipgloss.NewStyle().Bold(true).Padding(0, 3).Background(lipgloss.Color("#fc03ec")).Foreground(lipgloss.Color("#ffffff")),
-		NormalTextStyle:       lipgloss.NewStyle(),
-		ErrorTextStyle:        lipgloss.NewStyle().Foreground(lipgloss.Color("#ff0000")),
-		SelectedListItemStyle: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#fc03ec")),
-		HelpStyles:            helpStyles,
-	}
 }

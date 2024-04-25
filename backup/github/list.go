@@ -10,14 +10,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-type List struct {
-	repos             []Repo
-	reposList         list.Model
-	reposListDelegate *itemDelegate
-	keyMap            reposLoadedKeyMap
+type RepoList struct {
+	repos        []Repo
+	list         list.Model
+	listDelegate *itemDelegate
+	keyMap       reposLoadedKeyMap
 }
 
-func NewList(repos []Repo, keyMap reposLoadedKeyMap) *List {
+func NewList(repos []Repo, keyMap reposLoadedKeyMap) *RepoList {
 	items := make([]list.Item, len(repos))
 	for i, r := range repos {
 		items[i] = r
@@ -36,61 +36,61 @@ func NewList(repos []Repo, keyMap reposLoadedKeyMap) *List {
 	reposList.SetShowTitle(false)
 	reposList.KeyMap = keyMap.listKeyMap()
 
-	return &List{
-		repos:             repos,
-		reposList:         reposList,
-		reposListDelegate: reposListDelegate,
-		keyMap:            keyMap,
+	return &RepoList{
+		repos:        repos,
+		list:         reposList,
+		listDelegate: reposListDelegate,
+		keyMap:       keyMap,
 	}
 }
 
-func (l *List) Update(msg tea.Msg) tea.Cmd {
+func (l *RepoList) Update(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, l.keyMap.Select):
-			repo, ok := l.reposList.SelectedItem().(Repo)
+			repo, ok := l.list.SelectedItem().(Repo)
 			if ok {
-				_, selected := l.reposListDelegate.Selected[repo.Id]
+				_, selected := l.listDelegate.Selected[repo.Id]
 				if selected {
-					delete(l.reposListDelegate.Selected, repo.Id)
+					delete(l.listDelegate.Selected, repo.Id)
 				} else {
-					l.reposListDelegate.Selected[repo.Id] = struct{}{}
+					l.listDelegate.Selected[repo.Id] = struct{}{}
 				}
 			}
 		case key.Matches(msg, l.keyMap.SelectAll):
-			if len(l.reposListDelegate.Selected) > 0 {
+			if len(l.listDelegate.Selected) > 0 {
 				// unselect all
-				l.reposListDelegate.Selected = map[string]struct{}{}
+				l.listDelegate.Selected = map[string]struct{}{}
 			} else {
 				// select all
 				for _, repo := range l.repos {
-					l.reposListDelegate.Selected[repo.Id] = struct{}{}
+					l.listDelegate.Selected[repo.Id] = struct{}{}
 				}
 			}
 		default:
-			l.reposList, cmd = l.reposList.Update(msg)
+			l.list, cmd = l.list.Update(msg)
 		}
 	default:
-		l.reposList, cmd = l.reposList.Update(msg)
+		l.list, cmd = l.list.Update(msg)
 	}
 	return cmd
 }
 
-func (l *List) SetSize(w, h int) {
-	l.reposList.SetSize(w, h)
+func (l *RepoList) SetSize(w, h int) {
+	l.list.SetSize(w, h)
 }
 
-func (l *List) View() string {
-	return l.reposList.View()
+func (l *RepoList) View() string {
+	return l.list.View()
 }
 
-func (l *List) Selected() []Repo {
+func (l *RepoList) Selected() []Repo {
 	var selected []Repo
 	for _, r := range l.repos {
-		if _, ok := l.reposListDelegate.Selected[r.Id]; ok {
+		if _, ok := l.listDelegate.Selected[r.Id]; ok {
 			selected = append(selected, r)
 		}
 	}

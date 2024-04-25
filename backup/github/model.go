@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"backup/dialog"
 	bexec "backup/exec"
+	"backup/styles"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -40,6 +42,9 @@ type Repo struct {
 type Model struct {
 	state State
 
+	showConfirmDialog bool
+	confirmDialog     *dialog.Model
+
 	authenticationStatus string
 	authenticationError  error
 	loginError           error
@@ -47,7 +52,7 @@ type Model struct {
 	repos             []Repo
 	loadingReposError error
 
-	reposList       *List
+	reposList       *RepoList
 	validationError string
 
 	reposToClone []Repo
@@ -64,20 +69,21 @@ type Model struct {
 
 	helpView help.Model
 
-	styles Styles
+	styles styles.Styles
 
 	viewWidth, viewHeight int
 
 	spinner spinner.Model
 }
 
-func NewModel(backupRoot string, styles Styles) *Model {
+func NewModel(backupRoot string, styles styles.Styles) *Model {
 	helpView := help.New()
 	helpView.Styles = styles.HelpStyles
 	helpView.ShowAll = true
 
 	return &Model{
 		state:                Authenticating,
+		showConfirmDialog:    false,
 		authenticationStatus: "",
 		authenticationError:  nil,
 		loginError:           nil,
@@ -109,6 +115,25 @@ func (m *Model) Init() tea.Cmd {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if msg, ok := msg.(tea.KeyMsg); ok && msg.String() == "esc" {
+		m.showConfirmDialog = true
+		m.confirmDialog = dialog.NewModel(m.styles)
+		return m, nil
+	}
+
+	if m.showConfirmDialog {
+		if msg, ok := msg.(dialog.DialogResult); ok {
+			if msg.Confirmed {
+				return m, done()
+			}
+			m.showConfirmDialog = false
+			m.confirmDialog = nil
+			return m, nil
+		}
+		cmd := m.confirmDialog.Update(msg)
+		return m, cmd
+	}
+
 	var cmd tea.Cmd
 
 	switch m.state {
@@ -366,14 +391,20 @@ type cloneRepoResult struct {
 
 func cloneRepo(repo Repo, dir string) tea.Cmd {
 	return func() tea.Msg {
-		time.Sleep(10 * time.Second)
-		return cloneRepoResult{id: repo.Id, err: nil}
-		// ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-		// defer cancel()
-		// // run the command through sh, otherwise e.g. ~ in the path won't get expanded
-		// cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("gh repo clone %s %s", repo.Url, filepath.Join(dir, repo.Name)))
-		//
-		// err := cmd.Run()
-		// return cloneRepoResult{id: repo.Id, err: err}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+		defer cancel()
+		// run the command through sh, otherwise e.g. ~ in the path won't get expanded
+		cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("gh repo clone %s %s", repo.Url, filepath.Join(dir, repo.Name)))
+
+		err := cmd.Run()
+		return cloneRepoResult{id: repo.Id, err: err}
+	}
+}
+
+type Done struct{}
+
+func done() tea.Cmd {
+	return func() tea.Msg {
+		return Done{}
 	}
 }

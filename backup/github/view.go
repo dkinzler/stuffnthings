@@ -3,22 +3,16 @@ package github
 import (
 	"fmt"
 
-	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/lipgloss"
 )
 
-type Styles struct {
-	ViewStyle             lipgloss.Style
-	TitleStyle            lipgloss.Style
-	NormalTextStyle       lipgloss.Style
-	ErrorTextStyle        lipgloss.Style
-	SelectedListItemStyle lipgloss.Style
-	HelpStyles            help.Styles
-}
-
 func (m *Model) View() string {
+	if m.showConfirmDialog {
+		return m.viewConfirmDialog()
+	}
+
 	var content string
 
 	switch m.state {
@@ -41,6 +35,14 @@ func (m *Model) View() string {
 	}
 
 	return content
+}
+
+func (m *Model) viewConfirmDialog() string {
+	return fmt.Sprintf(
+		"%s\n\n%s\n",
+		m.styles.TitleStyle.Render("GitHub"),
+		m.confirmDialog.View("Do you really want to return to the main menu?"),
+	)
 }
 
 func (m *Model) viewAuthenticating() string {

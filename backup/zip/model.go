@@ -82,8 +82,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) View() string {
 	content := fmt.Sprintf(
-		"%s\n\n%s\n",
+		"%s\n\n%s\n%s\n",
 		m.styles.TitleStyle.Render("Zip Backup Directory"),
+		m.styles.NormalTextStyle.Render("Enter filename"),
 		m.textInput.View(),
 	)
 	if !m.inputValid {

@@ -104,7 +104,8 @@ type zipResult struct {
 }
 
 func zip(dir string, file string) tea.Cmd {
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("zip -r %s %s", file, dir))
+	// sh starts a new shell, so we do not have to worry about changing directory back
+	cmd := exec.Command("sh", "-c", fmt.Sprintf("cd %s && zip -r %s .", dir, file))
 	// note that zip prints errors to stdout
 	return bexec.Exec(cmd, func(err error, s string) tea.Msg {
 		if err != nil {

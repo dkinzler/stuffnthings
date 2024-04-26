@@ -4,6 +4,7 @@ import (
 	bexec "backup/exec"
 	"backup/styles"
 	"fmt"
+	"log"
 	"os/exec"
 	"strings"
 
@@ -109,6 +110,7 @@ func zip(dir string, file string) tea.Cmd {
 		if err != nil {
 			s = strings.TrimSpace(s)
 			e := fmt.Errorf("%v: %v", err, s)
+			log.Println(e)
 			return zipResult{err: e}
 		}
 		return zipResult{err: nil}

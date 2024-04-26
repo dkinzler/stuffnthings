@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os/exec"
 	"path/filepath"
 	"time"
@@ -321,7 +322,9 @@ func checkAuthentication() tea.Cmd {
 		c := exec.CommandContext(ctx, "gh", "auth", "status", "-h", "github.com")
 		out, err := c.CombinedOutput()
 		if err != nil {
-			return authenticationResult{err: fmt.Errorf("Not authenticated: %v", string(out))}
+			e := fmt.Errorf("Not authenticated: %v", string(out))
+			log.Println(e)
+			return authenticationResult{err: e}
 		}
 		return authenticationResult{status: string(out), err: nil}
 	}
@@ -337,6 +340,7 @@ func login() tea.Cmd {
 	return bexec.Exec(cmd, func(err error, s string) tea.Msg {
 		if err != nil {
 			e := fmt.Errorf("%v: %v", err, s)
+			log.Println(e)
 			return loginResult{err: e}
 		}
 		return loginResult{err: nil}
@@ -349,6 +353,7 @@ func switchUser() tea.Cmd {
 	return bexec.Exec(cmd, func(err error, s string) tea.Msg {
 		if err != nil {
 			e := fmt.Errorf("%v: %v", err, s)
+			log.Println(e)
 			return loginResult{err: e}
 		}
 		return loginResult{err: nil}
@@ -368,12 +373,15 @@ func loadRepos() tea.Cmd {
 
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			return loadReposResult{repos: nil, err: fmt.Errorf("could not load repos: %s", out)}
+			e := fmt.Errorf("could not load repos: %s", out)
+			log.Println(e)
+			return loadReposResult{repos: nil, err: e}
 		}
 
 		var repos []Repo
 		err = json.Unmarshal(out, &repos)
 		if err != nil {
+			log.Println("could not unmarshal json:", err)
 			return loadReposResult{repos: nil, err: errors.New("could not unmarshal json")}
 		}
 
@@ -391,13 +399,18 @@ type cloneRepoResult struct {
 
 func cloneRepo(repo Repo, dir string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*60)
 		defer cancel()
 		// run the command through sh, otherwise e.g. ~ in the path won't get expanded
 		cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("gh repo clone %s %s", repo.Url, filepath.Join(dir, repo.Name)))
 
-		err := cmd.Run()
-		return cloneRepoResult{id: repo.Id, err: err}
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			e := fmt.Errorf("%s: %s", err, out)
+			log.Println(e)
+			return loadReposResult{repos: nil, err: e}
+		}
+		return cloneRepoResult{id: repo.Id, err: nil}
 	}
 }
 

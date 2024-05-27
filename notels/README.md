@@ -1,5 +1,3 @@
-# What is this?
-
 An experiment in using a language server to implement features of note taking apps.
 Instead of using an app like Obsidian, you could use this server combined with any editor that supports the language server protocol.
 

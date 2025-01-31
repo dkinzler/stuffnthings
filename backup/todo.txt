@@ -1,13 +1,8 @@
 Next steps
 * generally -> add a bit of comment for decision decisions
 * sort out notes below
-* update bubbletea version, fix and try
-* give each model the full screen? -> why not, that way don't have to do any math, can have a common viewstyle that is used in each model, a bit more verbose but why not for full control in each model
+* make styles a global var? would be easier don't have to pass stuff around
 * first integrate backup dir selection, it should be top level item in main menu
-    * we can't select just dir with filepicker, we can but it will also show files, so maybe instead we just type it in and have a good default so that you don't even have to type
-        * but then we need a check if the directory is valid whenver we press enter and if not show an error message
-        * also we probably want to show a message if the directory is not empty because things might be overwritten and stuff -> that is fine and should probably be enough
-    * maybe for a dir check if it could be created, that is the test for validity, is that possible? or if it exists already if it can be written to
     * need to think about how to show the current dir yes at the top and if it is not empty show a warning?
     * pass previous dir and check if it already contains something
         * if yes show a warning, have at the top the current dir and below the error message or warning to be careful with changing dir
@@ -34,6 +29,10 @@ Next steps
 * refactor github
     * maybe it is easier to do it via api, just create a token for backup and store it in a file, can then easily get repo and only need git as dependency not github cli, yes this is probably better
     * but can we get api access easily with a token thingy? and can we then use that same token to also clone a repo?
+    * it is possible, you can look up the permissions needed
+        * create a fine-grained personal access token
+        * using that can query the api and also download directly a zip or tar or you git clone
+        * if you git clone you need to enter the token as a password, but that might be stored in history -> when doing it programatically you can maybe instead overwrite stdin to contain the token + a enter so the password is entered automatically
 * what about testing?
 * update readme
     * note that menu.go contains comment on how to add a new component

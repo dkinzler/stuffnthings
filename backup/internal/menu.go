@@ -3,8 +3,6 @@ package internal
 import (
 	"fmt"
 	"io"
-	"path/filepath"
-	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -21,10 +19,10 @@ import (
 type state int
 
 const (
-	MainMenu state = iota
-	DirSelect
-	Zip
-	Github
+	mainMenu state = iota
+	dirSelect
+	zip
+	github
 )
 
 // Most UI models/components will need this information.
@@ -33,7 +31,7 @@ const (
 // - cannot have a child model in a separate package since that would create an import cycle, would need to move commonState to its own package
 type commonState struct {
 	backupDir string
-	styles    Styles
+	styles    styles
 }
 
 type mainMenuModel struct {
@@ -49,8 +47,11 @@ type mainMenuModel struct {
 }
 
 func NewMainMenuModel() *mainMenuModel {
-	backupDir := defaultBackupDir()
-	styles := DefaultStyles()
+	backupDir, err := defaultBackupDir()
+	if err != nil {
+		panic(err)
+	}
+	styles := defaultStyles()
 	commonState := &commonState{
 		backupDir: backupDir,
 		styles:    styles,
@@ -73,7 +74,7 @@ func NewMainMenuModel() *mainMenuModel {
 	helpView.ShowAll = true
 
 	return &mainMenuModel{
-		state:       MainMenu,
+		state:       mainMenu,
 		commonState: commonState,
 
 		mainMenuList:         list,
@@ -85,12 +86,6 @@ func NewMainMenuModel() *mainMenuModel {
 		// but it can sometimes be useful to know the concrete types e.g. to call a method not part of the tea.Model interface.
 		dirSelectModel: nil,
 	}
-}
-
-// TODO move this to a filesytsem helper file, to create folders and stuff
-func defaultBackupDir() string {
-	date := time.Now().Format(time.DateOnly)
-	return filepath.Join("~/backup", date)
 }
 
 func (m *mainMenuModel) Init() tea.Cmd {
@@ -108,17 +103,13 @@ func (m *mainMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		// Note: instead of using SetSize on child models we could have passed the WindowSizeMsg through to them
 		m.SetSize(msg.Width, msg.Height)
-		// TODO call SetSize for child models
-		// if m.githubModel != nil {
-		// 	m.githubModel.SetSize(m.viewWidth, m.viewHeight)
-		// }
 	}
 
 	var cmd tea.Cmd
 
 	switch m.state {
 
-	case MainMenu:
+	case mainMenu:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch {
@@ -126,15 +117,15 @@ func (m *mainMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				s := int(m.mainMenuList.SelectedItem().(mainMenuItem))
 				switch s {
 				// TODO call setSize for inner models that need it
-				case MainMenuItemDirSelect:
-					m.state = DirSelect
+				case mainMenuItemDirSelect:
+					m.state = dirSelect
 					m.dirSelectModel = newDirSelectModel(m.commonState)
 					cmd = m.dirSelectModel.Init()
-				case MainMenuItemZip:
+				case mainMenuItemZip:
 					// m.state = Zip
 					// m.zipModel = zip.NewModel(m.backupDir, m.styles)
 					// cmd = m.zipModel.Init()
-				case MainMenuItemGithub:
+				case mainMenuItemGithub:
 					// m.state = Github
 					// m.githubModel = github.NewModel(m.backupDir, m.styles)
 					// m.githubModel.SetSize(m.viewWidth, m.viewHeight)
@@ -145,18 +136,18 @@ func (m *mainMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.mainMenuList, cmd = m.mainMenuList.Update(msg)
 
-	case DirSelect:
+	case dirSelect:
 		switch msg := msg.(type) {
 		case dirSelectDone:
 			if msg.backupDir != "" {
 				m.commonState.backupDir = msg.backupDir
 			}
 			m.dirSelectModel = nil
-			m.state = MainMenu
+			m.state = mainMenu
 		default:
 			_, cmd = m.dirSelectModel.Update(msg)
 		}
-	case Zip:
+	case zip:
 		// switch msg := msg.(type) {
 		// case zip.Done:
 		// 	m.zipModel = nil
@@ -164,7 +155,7 @@ func (m *mainMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// default:
 		// 	_, cmd = m.zipModel.Update(msg)
 		// }
-	case Github:
+	case github:
 		// switch msg := msg.(type) {
 		// case github.Done:
 		// 	m.githubModel = nil
@@ -187,6 +178,7 @@ func (m *mainMenuModel) SetSize(width, height int) {
 		height = 2
 	}
 	m.mainMenuList.SetSize(width, height)
+	// TODO if in inner model call SetSize on child model
 }
 
 func (m *mainMenuModel) View() string {
@@ -194,18 +186,18 @@ func (m *mainMenuModel) View() string {
 	styles := m.commonState.styles
 
 	switch m.state {
-	case MainMenu:
+	case mainMenu:
 		content = fmt.Sprintf(
 			"%s\n\n%s\n\n%s\n",
 			styles.TitleStyle.Render("Backup"),
 			m.mainMenuList.View(),
 			m.helpView.View(m.keyMap),
 		)
-	case DirSelect:
+	case dirSelect:
 		content = m.dirSelectModel.View()
-	case Zip:
+	case zip:
 		// content = m.zipModel.View()
-	case Github:
+	case github:
 		// content = m.githubModel.View()
 	}
 	return styles.ViewStyle.Render(content)
@@ -273,9 +265,9 @@ func (m mainMenuKeyMap) FullHelp() [][]key.Binding {
 }
 
 const (
-	MainMenuItemDirSelect int = iota
-	MainMenuItemZip
-	MainMenuItemGithub
+	mainMenuItemDirSelect int = iota
+	mainMenuItemZip
+	mainMenuItemGithub
 )
 
 // We won't actually need any of the methods since we use a custom delegate to draw the list items and don't enable filtering.
@@ -294,9 +286,9 @@ func (i mainMenuItem) Description() string {
 }
 
 var mainMenuItems = []list.Item{
-	mainMenuItem(MainMenuItemDirSelect),
-	mainMenuItem(MainMenuItemZip),
-	mainMenuItem(MainMenuItemGithub),
+	mainMenuItem(mainMenuItemDirSelect),
+	mainMenuItem(mainMenuItemZip),
+	mainMenuItem(mainMenuItemGithub),
 }
 
 type mainMenuItemDelegate struct {
@@ -327,13 +319,13 @@ func (d mainMenuItemDelegate) Render(w io.Writer, m list.Model, index int, listI
 	var description string
 
 	switch item {
-	case MainMenuItemDirSelect:
+	case mainMenuItemDirSelect:
 		title = "Change Backup Directory"
 		description = d.commonState.backupDir
-	case MainMenuItemZip:
+	case mainMenuItemZip:
 		title = "Zip"
 		description = "Zip Backup Directory"
-	case MainMenuItemGithub:
+	case mainMenuItemGithub:
 		title = "GitHub"
 		description = "Backup your repos"
 	default:

@@ -1,31 +1,18 @@
 Next steps
 * generally -> add a bit of comment for decision decisions
-* sort out notes below
 * make styles a global var? would be easier don't have to pass stuff around
-* first integrate backup dir selection, it should be top level item in main menu
-    * need to think about how to show the current dir yes at the top and if it is not empty show a warning?
-    * pass previous dir and check if it already contains something
-        * if yes show a warning, have at the top the current dir and below the error message or warning to be careful with changing dir
-    * should we select the root dir and then create a folder inside automatically like backup-dd-mm-yyyy?
-        * if so would have to check that that folder doesn't already exist, and if it does add some suffix to the name, maybe a random?
-        * or could just add the time in seconds, that should be enough
-    * or should user explicitly provide the name? maybe eaiser
-    * can we mix file picker and typing, that is edit wht was selected? we will see
-    * probably don't create the folder, it should be lazy, when first components writes something
-        * comment this somewhere
-    * use file picker?
-* refactor dialog thingy -> add quit confirm dialog to main menu
-* add back zip
-    * does exec have to be refactored, to make it easier? -> look again how the other projects do it
-    * we know that some commands we want to run in the background others in the foreground
-        * foreground
-            * when they are done we switch back to our app so that we can't see any error messages
-            * so what we probably would want is integrate it so that when we ran the command we get back
-                * the exit code, the output and error output
-                    * can comment that output might be large but not that large for our purposes, should be fine
-                * could then have a little simple component or just rendering function in error.go that renders that output in a little scrollable view using a bubbles component
-        * background
-            * should we show the user the command(s) that are running? probably depends
+* should we maybe use separate packages instead, it is kind of tedious to add qualifiers to every name?
+    * do it like this for now, if there are not too many problems maybe keep it?
+    * whatever you do note down what you did and the reasoning
+    * one problem is e.g. also zip state constant and zip function
+    * only thing that wouldn't work is the commonState but there can probably be a solution for this? either in separate package or just pass arguments normally
+    * passing arguments wouldn't be too hard
+* error pages
+    * create a command error page similar to the ex we have right now
+        * show command that was run and output of stdout and stderr + exit code and error if running it failed
+        * need to put a bit of effort into making it look nice
+            * can we set hieight of view dynamicylla based on content e.g. max 10 lines but if it is smaller we show less
+        * look at viewport example again to add the border and progress indicator and co
 * refactor github
     * maybe it is easier to do it via api, just create a token for backup and store it in a file, can then easily get repo and only need git as dependency not github cli, yes this is probably better
     * but can we get api access easily with a token thingy? and can we then use that same token to also clone a repo?
@@ -33,67 +20,15 @@ Next steps
         * create a fine-grained personal access token
         * using that can query the api and also download directly a zip or tar or you git clone
         * if you git clone you need to enter the token as a password, but that might be stored in history -> when doing it programatically you can maybe instead overwrite stdin to contain the token + a enter so the password is entered automatically
+* zip works but still some todos to make it look nicer and fix the small bugs and things and make code a bit better
+* think about dir selection again if it is the right workflow or we missed any sanity checks or similar?
+* pretty
+	* did anything change in the lipgloss package?
+    * do we do top level padding/margin or each model gets the full screen?
+    * dir selection from top to bottom
 * what about testing?
 * update readme
     * note that menu.go contains comment on how to add a new component
-
-
-
-
-ideas from other apps
-* most of the projects seem to take the approach of having a status enum + inner models that get messages passed through
-* a "common model" of different data parts that multiple sub models need, can then just pass a pointer to that around and have the same things everywhere
-	* makes sense if you have a lot of data like that e.g. they have width and height in there -> could do that, but then we wouldn't know the paddings and stuff, i.e. in inner model we don't know the real available size? is that important?
-	* for that both approaches of just passing e.g. the backup dir make sense
-	* but could also do it the other way and in common model have backup dir and styles?
-	* or we could do the size in there if we also give inner model complete space -> yes that is fine -> do it like that, don't have to process window sized change messages everywhere then
-	* -> but then again, we would still have to tell the inner model that size has changed probably? because sometimes we have e.g. calculated values based on that size and those needs to change
-		* also what about external models you use e.g. for list, do they expect that they get the windowsizechanged message? if so you have to pass it through anyway, that is fine then
-		* IT DOESN'T but it has a setsize method so we could probably do the same, but then we can't have an interface inner model
-		* maybe just pass the messages through, why not
-		* BUT inner models also need to get the size from somewhere, maybe when created?
-	* maybe just pass em through and add a little explanation that that is what we do and it could be done differently with
-* they have functions FullHelp and ShortHelp on model that return that stuff? not sure how that makes sense but they also have their own struct with a field for each key binding
-	* probably ignore that one
-* check also how do they do testing if any?
-* just explain the different decisions in comments
-	* e.g. having a single inner model field on main model vs having a field for each possible inner model, both work and some actual apps also use the second approach, so that is not necessarily bad
-
-
-
-rework existing program, make it a bit simpler
-* obviously a script would work as well, but it is a nice little opportunity to build a terminal UI
-* should we have subcommands for individual things? maybe not, just do the one happy path that works
-	* can keep it in mind, but don't worry about it for not
-
-
-rework existing
-* update to newest bubbletea version, just have to change init struct
-* a styles package that has a styles struct and a default style
-	* every component should get it in init
-	* e.g. should have a ListItemHeaderText ListItemSubtitleText ListHeaderText or HelpButtonText and HelpDescriptionText and so on
-	* did anything change in the lipgloss package?
-* a package for exec stuff, running commands
-	* how do we do it right now?
-	* maybe it would be good to be able to run a command and give it the terminal but also capture the output? -> that should easily be possible
-* github
-	* make it simpler in the sense that you move more work to the external programs and don't have as many screens in your app e.g. for waiting etc e.g. can probably do the auth and getting projects in one go -> then you don't need the waiting/steps
-		* BUT is this really necessary? what we have works, so maybe just keep using it, why not? and it is e.g. not that hard to have a screen that waits for stuff? -> could just have a generic one? (the problem with a generic one is that you don't know where to return to or at least that takes a decent bit of extra code)
-			* maybe check it out and see if simplifing makes sense, makes the code a lot simpler? if so maybe go for it
-		* what happens if you run a command and are not authenticated? it will ask you to?
-		* here we would probably need the think about that runs a command and gives it the terminal but also captures the output
-* any model should always get the path to save files in and it should create it's own subfolder
-	* do we have a package to make these subfolders and stuff if necessary? -> do a little fsutil package
-* in fact you can probably make a very simple but basic template of what model code for use in this should look like
-	* it should get the path to save in, maybe a success function or similar mechanism and the current styles?
-		* what would success function look like, maybe just a tea.Cmd? or a function that returns a tea.Cmd? one of those two -> can then just use it like a normal command, doesn't get any arguments, it should then be handled by the outer model
-			* and of course the function can be nil
-* rethink main screen
-	* add a checkmark if it was run in current session?
-	* might need to pass a callback to the model that is called when a backup is successfully created
-* rethink how to handle size changes?
-	* just modify the WindowSize msg in the outer model to return smaller dimensions to child models? -> maybe
 * how to do a "progress report"
 	* e.g. if you run a command like an external program that runs some time and u want to emit multiple messages from there?
 		* is there an example for this? or somebody probably asked this before -> google
-* for folder saves we need to make sure that when we create a directory that it doesn't already exist and if it does give it a separate name like -1 or with a random thingy at the end?

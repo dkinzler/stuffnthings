@@ -49,6 +49,10 @@ func getParentPath(path string) string {
 	return filepath.Dir(filepath.Clean(path))
 }
 
+func getBasePath(path string) string {
+	return filepath.Base(filepath.Clean(path))
+}
+
 func getAbsPath(path string) (string, error) {
 	path = filepath.Clean(path)
 	switch {

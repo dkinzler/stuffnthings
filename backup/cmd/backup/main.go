@@ -34,7 +34,8 @@ func main() {
 }
 
 func run(logFile string) error {
-	f, err := tea.LogToFile(logFile, "log")
+	// TODO change "debug" back to "log"
+	f, err := tea.LogToFile(logFile, "debug")
 	if err != nil {
 		return err
 	}

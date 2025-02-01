@@ -23,6 +23,7 @@ const (
 	dirSelect
 	zip
 	github
+	exTest
 )
 
 // Most UI models/components will need this information.
@@ -37,13 +38,18 @@ type commonState struct {
 type mainMenuModel struct {
 	state       state
 	commonState *commonState
+	// whether or not to show the confirm quit dialog
+	confirmQuit bool
 
 	mainMenuList         list.Model
 	mainMenuItemDelegate *mainMenuItemDelegate
 	helpView             help.Model
 	keyMap               mainMenuKeyMap
 
-	dirSelectModel *dirSelectModel
+	dirSelectModel   *dirSelectModel
+	zipModel         *zipModel
+	confirmQuitModel *dialogModel
+	exModel          *exModel
 }
 
 func NewMainMenuModel() *mainMenuModel {
@@ -76,6 +82,7 @@ func NewMainMenuModel() *mainMenuModel {
 	return &mainMenuModel{
 		state:       mainMenu,
 		commonState: commonState,
+		confirmQuit: false,
 
 		mainMenuList:         list,
 		mainMenuItemDelegate: itemDelegate,
@@ -84,7 +91,10 @@ func NewMainMenuModel() *mainMenuModel {
 
 		// Note: instead of keeping track of each possible child model, we could have used a single generic "innerModel" field of type tea.Model,
 		// but it can sometimes be useful to know the concrete types e.g. to call a method not part of the tea.Model interface.
-		dirSelectModel: nil,
+		dirSelectModel:   nil,
+		zipModel:         nil,
+		confirmQuitModel: nil,
+		exModel:          nil,
 	}
 }
 
@@ -94,11 +104,31 @@ func (m *mainMenuModel) Init() tea.Cmd {
 }
 
 func (m *mainMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.confirmQuit {
+		// process any other messages as usual e.g. inner models might have async commands running that might return a message while the confirm quit dialog is still open
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			cmd := m.confirmQuitModel.Update(msg)
+			return m, cmd
+		case dialogDone:
+			if msg.confirmed {
+				return m, tea.Quit
+			} else {
+				m.confirmQuit = false
+				m.confirmQuitModel = nil
+				return m, nil
+			}
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
+		// TODO do these with keyMap bindings and key.Matches, can we define ctrl+c there? probably
 		case "ctrl+c", "q":
-			return m, tea.Quit
+			m.confirmQuit = true
+			m.confirmQuitModel = newDialogModel(m.commonState.styles)
+			return m, nil
 		}
 	case tea.WindowSizeMsg:
 		// Note: instead of using SetSize on child models we could have passed the WindowSizeMsg through to them
@@ -121,10 +151,14 @@ func (m *mainMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.state = dirSelect
 					m.dirSelectModel = newDirSelectModel(m.commonState)
 					cmd = m.dirSelectModel.Init()
+				case mainMenuItemExTest:
+					m.state = exTest
+					m.exModel = newExModel(m.commonState.styles)
+					cmd = m.exModel.Init()
 				case mainMenuItemZip:
-					// m.state = Zip
-					// m.zipModel = zip.NewModel(m.backupDir, m.styles)
-					// cmd = m.zipModel.Init()
+					m.state = zip
+					m.zipModel = newZipModel(m.commonState)
+					cmd = m.zipModel.Init()
 				case mainMenuItemGithub:
 					// m.state = Github
 					// m.githubModel = github.NewModel(m.backupDir, m.styles)
@@ -147,14 +181,19 @@ func (m *mainMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			_, cmd = m.dirSelectModel.Update(msg)
 		}
+	case exTest:
+		switch msg := msg.(type) {
+		default:
+			_, cmd = m.exModel.Update(msg)
+		}
 	case zip:
-		// switch msg := msg.(type) {
-		// case zip.Done:
-		// 	m.zipModel = nil
-		// 	m.state = MainMenu
-		// default:
-		// 	_, cmd = m.zipModel.Update(msg)
-		// }
+		switch msg := msg.(type) {
+		case zipDone:
+			m.zipModel = nil
+			m.state = mainMenu
+		default:
+			_, cmd = m.zipModel.Update(msg)
+		}
 	case github:
 		// switch msg := msg.(type) {
 		// case github.Done:
@@ -185,6 +224,11 @@ func (m *mainMenuModel) View() string {
 	var content string
 	styles := m.commonState.styles
 
+	if m.confirmQuit {
+		content = m.confirmQuitModel.View(styles.NormalTextStyle.Render("Do you really want to quit?"), "yes", "no")
+		return styles.ViewStyle.Render(content)
+	}
+
 	switch m.state {
 	case mainMenu:
 		content = fmt.Sprintf(
@@ -195,8 +239,10 @@ func (m *mainMenuModel) View() string {
 		)
 	case dirSelect:
 		content = m.dirSelectModel.View()
+	case exTest:
+		content = m.exModel.View()
 	case zip:
-		// content = m.zipModel.View()
+		content = m.zipModel.View()
 	case github:
 		// content = m.githubModel.View()
 	}
@@ -268,6 +314,7 @@ const (
 	mainMenuItemDirSelect int = iota
 	mainMenuItemZip
 	mainMenuItemGithub
+	mainMenuItemExTest
 )
 
 // We won't actually need any of the methods since we use a custom delegate to draw the list items and don't enable filtering.
@@ -289,6 +336,8 @@ var mainMenuItems = []list.Item{
 	mainMenuItem(mainMenuItemDirSelect),
 	mainMenuItem(mainMenuItemZip),
 	mainMenuItem(mainMenuItemGithub),
+	// TODO delete this
+	mainMenuItem(mainMenuItemExTest),
 }
 
 type mainMenuItemDelegate struct {
@@ -328,6 +377,9 @@ func (d mainMenuItemDelegate) Render(w io.Writer, m list.Model, index int, listI
 	case mainMenuItemGithub:
 		title = "GitHub"
 		description = "Backup your repos"
+	case mainMenuItemExTest:
+		title = "ExTest"
+		description = "Great Test"
 	default:
 		return
 	}

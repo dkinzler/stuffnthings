@@ -13,20 +13,41 @@ type dialogModel struct {
 
 	helpView help.Model
 
+	singleButton bool
+
 	styles styles
 }
 
-// TODO rename to yesnodialog?
-func newDialogModel(styles styles) *dialogModel {
+// TODO keep this with just a single option or add use argument to newDialogModel
+// or are there any other options we would want?
+type dialogOption func(*dialogModel)
+
+func dialogOptionWithSingleButton() dialogOption {
+	return func(dm *dialogModel) {
+		dm.singleButton = true
+	}
+}
+
+// TODO rename to yesnodialog? or something similar?
+func newDialogModel(styles styles, options ...dialogOption) *dialogModel {
 	help := help.New()
 	help.Styles = styles.HelpStyles
 	help.ShowAll = true
 
-	return &dialogModel{
-		keyMap:   defaultDialogKeyMap(),
-		helpView: help,
-		styles:   styles,
+	dm := &dialogModel{
+		keyMap:       defaultDialogKeyMap(),
+		helpView:     help,
+		singleButton: false,
+		styles:       styles,
 	}
+	for _, opt := range options {
+		opt(dm)
+	}
+
+	if dm.singleButton {
+		dm.keyMap.No.SetEnabled(false)
+	}
+	return dm
 }
 
 func (m *dialogModel) Init() tea.Cmd {
@@ -41,17 +62,26 @@ func (m *dialogModel) Update(msg tea.Msg) tea.Cmd {
 		case key.Matches(msg, m.keyMap.Yes):
 			cmd = returnFromDialog(true)
 		case key.Matches(msg, m.keyMap.No):
-			cmd = returnFromDialog(false)
+			if !m.singleButton {
+				cmd = returnFromDialog(false)
+			}
 		}
 	}
 	return cmd
 }
 
-func (m *dialogModel) View(content string) string {
+// TODO can we maybe do this better? options? but this is also fine
+// there has to be a better way to do all this with yesText, noText and co
+// the problem is basically we want to probably only define the text when we render not when we create the model?
+func (m *dialogModel) View(content, yesText, noText string) string {
+	keyMap := m.keyMap
+	keyMap.Yes.SetHelp(keyMap.Yes.Help().Key, yesText)
+	keyMap.No.SetHelp(keyMap.No.Help().Key, noText)
+
 	return fmt.Sprintf(
 		"%s\n\n%s\n",
 		content,
-		m.helpView.View(m.keyMap),
+		m.helpView.View(keyMap),
 	)
 }
 

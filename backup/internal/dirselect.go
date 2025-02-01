@@ -144,7 +144,7 @@ func (m *dirSelectModel) View() string {
 			// TODO this shouldn't happen, just do the above in the else clause here?
 		}
 		content := styles.ErrorTextStyle.Render(fmt.Sprintf("Warning: %s\nDo you want to continue?", warningText))
-		return m.warningDialog.View(content)
+		return m.warningDialog.View(content, "yes", "no")
 	} else {
 		content := fmt.Sprintf(
 			"%s\n\n%s\n%s\n",

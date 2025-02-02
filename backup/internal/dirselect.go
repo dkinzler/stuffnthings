@@ -10,23 +10,29 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-type dirSelectModel struct {
-	commonState       *commonState
-	inputValid        bool
-	inputError        error
-	showWarningDialog bool
-	warning           int
+type dirSelectState int
 
-	textInput     textinput.Model
-	warningDialog *dialogModel
-	keyMap        dirSelectKeyMap
-	helpView      help.Model
-}
+const (
+	dirSelectStateInput dirSelectState = iota
+	dirSelectStateWarning
+)
 
 const (
 	warningDirNotEmpty = iota
 	warningParentNotExists
 )
+
+type dirSelectModel struct {
+	commonState *commonState
+	state       dirSelectState
+	inputValid  bool
+	inputError  error
+	warning     int
+
+	textInput textinput.Model
+	keyMap    dirSelectKeyMap
+	helpView  help.Model
+}
 
 func newDirSelectModel(commonState *commonState) *dirSelectModel {
 	bt := textinput.New()
@@ -40,15 +46,15 @@ func newDirSelectModel(commonState *commonState) *dirSelectModel {
 	helpView.ShowAll = true
 
 	return &dirSelectModel{
-		commonState:       commonState,
-		inputValid:        true,
-		inputError:        nil,
-		showWarningDialog: false,
+		commonState: commonState,
+		state:       dirSelectStateInput,
+		inputValid:  true,
+		inputError:  nil,
+		warning:     -1,
 
-		textInput:     bt,
-		warningDialog: nil,
-		keyMap:        defaultDirSelectKeyMap(),
-		helpView:      helpView,
+		textInput: bt,
+		keyMap:    defaultDirSelectKeyMap(),
+		helpView:  helpView,
 	}
 }
 
@@ -59,7 +65,9 @@ func (m *dirSelectModel) Init() tea.Cmd {
 
 func (m *dirSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	if !m.showWarningDialog {
+
+	switch m.state {
+	case dirSelectStateInput:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch {
@@ -77,17 +85,18 @@ func (m *dirSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.inputValid = false
 						m.inputError = err
 					} else if empty {
-						m.inputValid = true
 						exists, err := dirExists(getParentPath(absPath))
 						if err != nil {
 							m.inputValid = false
 							m.inputError = err
 						} else if !exists {
-							m.showWarningDialog = true
+							m.inputValid = true
+							m.inputError = nil
+							m.state = dirSelectStateWarning
 							m.warning = warningParentNotExists
-							m.warningDialog = newDialogModel(m.commonState.styles)
 						} else {
 							m.inputValid = true
+							m.inputError = nil
 							// TODO is it possible that this command gets run async and that in the meantime the user can press enter again and cause the same thing again?
 							// wouldn't really be a big problem but still
 							// to avoid this we could use a separate finished state that we switch into here that just does nothing with a msg
@@ -97,9 +106,8 @@ func (m *dirSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} else {
 						// TODO factor this out into a common method
 						// probably want to refactor this whole code anyway all these if elses are kinda ugly, what is a better way to do it?
-						m.showWarningDialog = true
+						m.state = dirSelectStateWarning
 						m.warning = warningDirNotEmpty
-						m.warningDialog = newDialogModel(m.commonState.styles)
 					}
 				}
 			case key.Matches(msg, m.keyMap.Cancel):
@@ -110,43 +118,31 @@ func (m *dirSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			m.textInput, cmd = m.textInput.Update(msg)
 		}
-	} else {
+	case dirSelectStateWarning:
 		switch msg := msg.(type) {
-		case dialogDone:
-			if msg.confirmed {
+		case tea.KeyMsg:
+			switch {
+			case key.Matches(msg, m.keyMap.WarningConfirm):
 				// TODO don't recompute abs path again, need to store it above
 				absPath, _ := getAbsPath(m.textInput.Value())
 				cmd = returnBackupDir(absPath)
-			} else {
-				m.showWarningDialog = false
-				m.warningDialog = nil
+			case key.Matches(msg, m.keyMap.WarningCancel):
+				m.state = dirSelectStateInput
 			}
-		default:
-			cmd = m.warningDialog.Update(msg)
 		}
 	}
 	return m, cmd
 }
 
 func (m *dirSelectModel) View() string {
+	// TODO a common type of rendering is with a title content and help at the bottom
+	// maybe make a function for that, so we don't have to repeat the same pattern over and over?
 	styles := m.commonState.styles
-	if m.showWarningDialog {
-		// TODO better text here pls
-		// TODO probably we should show the currently selected abs path also here -> create a field on model
-		var warningText string
-		if m.warning == warningDirNotEmpty {
-			warningText = "selected directory is not empty, if you continue files may be overwritten"
-		} else if m.warning == warningParentNotExists {
-			// TODO maybe don't have the might be a typo part? because sometimes you might want to backup in a subfolder of a new folder
-			// or keep it but formulate it differently, you sure you didn't mistype?
-			warningText = "parent directory does not exist, might be a typo"
-		} else {
-			// TODO this shouldn't happen, just do the above in the else clause here?
-		}
-		content := styles.ErrorTextStyle.Render(fmt.Sprintf("Warning: %s\nDo you want to continue?", warningText))
-		return m.warningDialog.View(content, "yes", "no")
-	} else {
-		content := fmt.Sprintf(
+	content := ""
+
+	switch m.state {
+	case dirSelectStateInput:
+		content = fmt.Sprintf(
 			"%s\n\n%s\n%s\n",
 			styles.TitleStyle.Render("Change Backup Directory"),
 			styles.NormalTextStyle.Render(fmt.Sprintf("Current: %s", m.commonState.backupDir)),
@@ -155,9 +151,29 @@ func (m *dirSelectModel) View() string {
 		if !m.inputValid {
 			content = fmt.Sprintf("%s\n%s\n", content, styles.ErrorTextStyle.Render(m.inputError.Error()))
 		}
-		content = fmt.Sprintf("%s\n%s\n", content, m.helpView.View(m.keyMap))
-		return content
+		content = fmt.Sprintf("%s\n%s\n", content, m.helpView.ShortHelpView(m.keyMap.inputKeys()))
+	case dirSelectStateWarning:
+		// TODO better text here pls
+		// TODO probably we should show the currently selected abs path also here -> create a field on model
+		var warningText string
+		// TODO we might also get into problems here with no text wrapping?
+		if m.warning == warningDirNotEmpty {
+			warningText = "Selected directory is not empty, if you continue files may be overwritten."
+		} else if m.warning == warningParentNotExists {
+			// TODO maybe don't have the might be a typo part? because sometimes you might want to backup in a subfolder of a new folder
+			// or keep it but formulate it differently, you sure you didn't mistype?
+			warningText = "Parent directory does not exist, might be a typo."
+		} else {
+			// TODO this shouldn't happen, just do the above in the else clause here?
+		}
+		content = fmt.Sprintf(
+			"%s\n\n%s\n\n%s\n",
+			styles.TitleStyle.Render("Warning!"),
+			styles.ErrorTextStyle.Render(fmt.Sprintf("%s\nDo you want to continue?", warningText)),
+			m.helpView.ShortHelpView(m.keyMap.warningKeys()),
+		)
 	}
+	return content
 }
 
 type dirSelectDone struct {
@@ -174,6 +190,9 @@ func returnBackupDir(backupDir string) tea.Cmd {
 type dirSelectKeyMap struct {
 	Confirm key.Binding
 	Cancel  key.Binding
+
+	WarningConfirm key.Binding
+	WarningCancel  key.Binding
 }
 
 func defaultDirSelectKeyMap() dirSelectKeyMap {
@@ -186,13 +205,21 @@ func defaultDirSelectKeyMap() dirSelectKeyMap {
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "cancel"),
 		),
+		WarningConfirm: key.NewBinding(
+			key.WithKeys("enter", "y"),
+			key.WithHelp("enter/y", "yes"),
+		),
+		WarningCancel: key.NewBinding(
+			key.WithKeys("esc", "n"),
+			key.WithHelp("esc/n", "no"),
+		),
 	}
 }
 
-func (m dirSelectKeyMap) ShortHelp() []key.Binding {
+func (m dirSelectKeyMap) inputKeys() []key.Binding {
 	return []key.Binding{m.Cancel, m.Confirm}
 }
 
-func (m dirSelectKeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{m.Cancel}, {m.Confirm}}
+func (m dirSelectKeyMap) warningKeys() []key.Binding {
+	return []key.Binding{m.WarningCancel, m.WarningConfirm}
 }

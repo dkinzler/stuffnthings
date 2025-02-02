@@ -8,12 +8,65 @@ Next steps
     * only thing that wouldn't work is the commonState but there can probably be a solution for this? either in separate package or just pass arguments normally
     * passing arguments wouldn't be too hard
 * error pages
+    * make that "ups, something went wrong"
+    * just distribute available space between stdout and stderr equaly if non are empty
     * create a command error page similar to the ex we have right now
         * show command that was run and output of stdout and stderr + exit code and error if running it failed
         * need to put a bit of effort into making it look nice
             * can we set hieight of view dynamicylla based on content e.g. max 10 lines but if it is smaller we show less
         * look at viewport example again to add the border and progress indicator and co
+* help
+    * for many we can just have fixed short or full help, because even full help is just like 2 lines
+    * don't need to implement full/short help functions and can just use helpView.ShortHelpView etc.
+* for dialogs
+    * maybe don't use a separate model but just embed them directly
+    * probably roughly the same amount of code but will feel less clunky than adapting the dialog slightly every time
+        * e.g. we always need a return message that we need to catch again in outer model anyway
+        * so that already is also a bit of code for the update function
+    * to make help view easier we can directly use
+        * help.Model.ShortHelpView or FullhelpView with the []key.binding or [][]key.binding
+        * how would that help?
+            * can define a struct where all of these keybinds are in and can then manually
+            * create the []key.binding or define functions that return the corresponding ones
+        * also need to set width on help -> we can yes?
+    * can also have some functions that combine stuff e.g. a view or render function that takes title, content and keymap and applies common formatting
+    * what do we need?
+        * a state variable
+        * in Update have a case for that state and basically just need to catch the keymsgs for the one or two keys
+        * a keymap for each screen, prolly as a struct, why not
+            * or is there a way where we have a global keymap struct
+            * and then functions that return subsets? but those subsets would need to implement
+              fullhlep and shorthelp as well? would that work? check out help package again
+        * rendering, can probably make some common functions for this
+            * based on title, content and keymap
+            * can even do this globally for each screen
+            * yeah, refactor everything for this
+    * note down somewhere that we could have done a separate dialog thing but that using an inner model is again a bit of code
+        * and that it is not much difference in total code so we keep it like this for now
+        * that is the easiest way that still gives full control
+        * could later maybe factor out a dialog if that makes sense or we see a good abstraction
+    * remove dialog.go
+* for command error page we could instead
+    * show the last lines of output and error streams
+    * and have keys to open the full things in less or more?
+    * that would work well
+    * need to handle all the keys again, but that is fine, shouldn't be too much work
 * refactor github
+    * what states do we need
+        * no token provided
+            * we check initially and go straight there
+        * loading repos
+            * if we have a token we go straight there from start
+        * repos loaded
+            * show repos to select which to backup, maybe with some info at the top like the github username and number of repos and shit
+            * fancy would be if in the list you can expand an item to e.g. show more info whether the repo is empty or not, when was last commit etc.
+        * loading repos error
+            * has retry button or cancel to go back to main menu
+        * cloning repos
+            * progress just as right now, can keep that
+        * cloning repos done
+            * just as we have right now
+    * how to show errors? make a common screen?
     * maybe it is easier to do it via api, just create a token for backup and store it in a file, can then easily get repo and only need git as dependency not github cli, yes this is probably better
     * but can we get api access easily with a token thingy? and can we then use that same token to also clone a repo?
     * it is possible, you can look up the permissions needed
@@ -21,6 +74,7 @@ Next steps
         * using that can query the api and also download directly a zip or tar or you git clone
         * if you git clone you need to enter the token as a password, but that might be stored in history -> when doing it programatically you can maybe instead overwrite stdin to contain the token + a enter so the password is entered automatically
 * zip works but still some todos to make it look nicer and fix the small bugs and things and make code a bit better
+    * better error output, maybe include complete output in a view?
 * think about dir selection again if it is the right workflow or we missed any sanity checks or similar?
 * pretty
 	* did anything change in the lipgloss package?

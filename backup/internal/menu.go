@@ -16,6 +16,9 @@ import (
 // - add a state constant, a field for the model pointer in the mainMenuModel struct and add appropriate cases to the Update method
 // - add a mainMenuItem constant, update the global mainMenuItems variable and update the Render method of mainMenuItemDelegate
 
+// TODO if we don't use separate packages maybe rename thisi to mainMenuState?
+// and rename the entries to mainMenuStateDirSelect etc?
+// these get kinda ugly, why not use separate packages?
 type state int
 
 const (
@@ -77,7 +80,6 @@ func NewMainMenuModel() *mainMenuModel {
 
 	helpView := help.New()
 	helpView.Styles = styles.HelpStyles
-	helpView.ShowAll = true
 
 	return &mainMenuModel{
 		state:       mainMenu,
@@ -91,10 +93,9 @@ func NewMainMenuModel() *mainMenuModel {
 
 		// Note: instead of keeping track of each possible child model, we could have used a single generic "innerModel" field of type tea.Model,
 		// but it can sometimes be useful to know the concrete types e.g. to call a method not part of the tea.Model interface.
-		dirSelectModel:   nil,
-		zipModel:         nil,
-		confirmQuitModel: nil,
-		exModel:          nil,
+		dirSelectModel: nil,
+		zipModel:       nil,
+		exModel:        nil,
 	}
 }
 
@@ -108,14 +109,14 @@ func (m *mainMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// process any other messages as usual e.g. inner models might have async commands running that might return a message while the confirm quit dialog is still open
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
-			cmd := m.confirmQuitModel.Update(msg)
-			return m, cmd
-		case dialogDone:
-			if msg.confirmed {
+			switch {
+			case key.Matches(msg, m.keyMap.ConfirmQuit):
 				return m, tea.Quit
-			} else {
+			case key.Matches(msg, m.keyMap.CancelQuit):
 				m.confirmQuit = false
-				m.confirmQuitModel = nil
+				return m, nil
+			default:
+				// need to return, otherwise key message would be passed through
 				return m, nil
 			}
 		}
@@ -123,11 +124,9 @@ func (m *mainMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		// TODO do these with keyMap bindings and key.Matches, can we define ctrl+c there? probably
-		case "ctrl+c", "q":
+		switch {
+		case key.Matches(msg, m.keyMap.Quit):
 			m.confirmQuit = true
-			m.confirmQuitModel = newDialogModel(m.commonState.styles)
 			return m, nil
 		}
 	case tea.WindowSizeMsg:
@@ -208,7 +207,8 @@ func (m *mainMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *mainMenuModel) SetSize(width, height int) {
 	// title takes 2 lines, help takes 3 lines, including empty lines and global margin/padding takes some space
-	_, h := m.commonState.styles.ViewStyle.GetFrameSize()
+	w, h := m.commonState.styles.ViewStyle.GetFrameSize()
+	// TODO name this innerHeight and innerWidth?
 	height = height - h - 5
 	if height > 9 {
 		height = 9
@@ -216,7 +216,9 @@ func (m *mainMenuModel) SetSize(width, height int) {
 	if height < 0 {
 		height = 2
 	}
+	width = width - w
 	m.mainMenuList.SetSize(width, height)
+	m.helpView.Width = width
 	// TODO if in inner model call SetSize on child model
 }
 
@@ -225,7 +227,13 @@ func (m *mainMenuModel) View() string {
 	styles := m.commonState.styles
 
 	if m.confirmQuit {
-		content = m.confirmQuitModel.View(styles.NormalTextStyle.Render("Do you really want to quit?"), "yes", "no")
+		content = fmt.Sprintf(
+			"%s\n\n%s\n\n%s\n",
+			// TODO better title text?
+			styles.TitleStyle.Render("Confirm Quit"),
+			styles.NormalTextStyle.Render("Do you really want to quit?"),
+			m.helpView.ShortHelpView(m.keyMap.confirmQuitKeys()),
+		)
 		return styles.ViewStyle.Render(content)
 	}
 
@@ -235,7 +243,7 @@ func (m *mainMenuModel) View() string {
 			"%s\n\n%s\n\n%s\n",
 			styles.TitleStyle.Render("Backup"),
 			m.mainMenuList.View(),
-			m.helpView.View(m.keyMap),
+			m.helpView.FullHelpView(m.keyMap.mainMenuKeys()),
 		)
 	case dirSelect:
 		content = m.dirSelectModel.View()
@@ -250,10 +258,12 @@ func (m *mainMenuModel) View() string {
 }
 
 type mainMenuKeyMap struct {
-	CursorUp   key.Binding
-	CursorDown key.Binding
-	Select     key.Binding
-	Exit       key.Binding
+	CursorUp    key.Binding
+	CursorDown  key.Binding
+	Select      key.Binding
+	Quit        key.Binding
+	ConfirmQuit key.Binding
+	CancelQuit  key.Binding
 }
 
 func defaultMainMenuKeyMap() mainMenuKeyMap {
@@ -270,9 +280,17 @@ func defaultMainMenuKeyMap() mainMenuKeyMap {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "select"),
 		),
-		Exit: key.NewBinding(
-			key.WithKeys("q"),
-			key.WithHelp("q", "quit"),
+		Quit: key.NewBinding(
+			key.WithKeys("q", "ctrl+c"),
+			key.WithHelp("q/ctrl+c", "quit"),
+		),
+		ConfirmQuit: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "yes"),
+		),
+		CancelQuit: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "no"),
 		),
 	}
 }
@@ -294,20 +312,15 @@ func (m mainMenuKeyMap) listKeyMap() list.KeyMap {
 	}
 }
 
-func (m mainMenuKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{
-		m.CursorUp,
-		m.CursorDown,
-		m.Select,
-		m.Exit,
+func (m mainMenuKeyMap) mainMenuKeys() [][]key.Binding {
+	return [][]key.Binding{
+		{m.CursorUp, m.CursorDown},
+		{m.Select, m.Quit},
 	}
 }
 
-func (m mainMenuKeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{m.CursorUp, m.CursorDown},
-		{m.Select, m.Exit},
-	}
+func (m mainMenuKeyMap) confirmQuitKeys() []key.Binding {
+	return []key.Binding{m.CancelQuit, m.ConfirmQuit}
 }
 
 const (

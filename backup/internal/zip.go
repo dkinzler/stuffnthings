@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -9,17 +10,27 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+type zipState int
+
+const (
+	zipStateInput zipState = iota
+	// TODO could have had a separate state zipStateZipping but not really necessary?
+	// maybe for completeness so that we can't spam keys and cause another zip to happen?
+	// although that is unlikely, but why not do it
+	zipStateSuccess
+	zipStateError
+)
+
 type zipModel struct {
 	commonState *commonState
+	state       zipState
+	inputError  error
+	zipResult   execResult
 
-	textInput  textinput.Model
-	inputValid bool
-	error      string
-	keyMap     zipKeyMap
-	help       help.Model
+	keyMap zipKeyMap
 
-	success       bool
-	successDialog *dialogModel
+	textInput textinput.Model
+	help      help.Model
 }
 
 func newZipModel(commonState *commonState) *zipModel {
@@ -30,90 +41,113 @@ func newZipModel(commonState *commonState) *zipModel {
 
 	help := help.New()
 	help.Styles = commonState.styles.HelpStyles
-	help.ShowAll = true
 
 	return &zipModel{
-		commonState:   commonState,
-		textInput:     zt,
-		inputValid:    true,
-		error:         "",
-		keyMap:        defaultZipKeyMap(),
-		help:          help,
-		success:       false,
-		successDialog: nil,
+		commonState: commonState,
+		state:       zipStateInput,
+		inputError:  nil,
+		keyMap:      defaultZipKeyMap(),
+		textInput:   zt,
+		help:        help,
 	}
 }
 
 func (m *zipModel) Init() tea.Cmd {
+	// TODO do we need to init help or textinput?
 	return nil
 }
 
 func (m *zipModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.success {
-		switch msg := msg.(type) {
-		case dialogDone:
-			return m, returnFromZip()
-		default:
-			return m, m.successDialog.Update(msg)
-		}
-	}
-
 	var cmd tea.Cmd
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch {
-		case key.Matches(msg, m.keyMap.Confirm):
-			file := m.textInput.Value()
-			if file == "" {
-				m.inputValid = false
-			} else {
-				// TODO show error message?
-				absFile, err := getAbsPath(file)
-				if err != nil {
-					m.inputValid = false
+
+	switch m.state {
+	case zipStateInput:
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch {
+			case key.Matches(msg, m.keyMap.InputConfirm):
+				file := m.textInput.Value()
+				if file == "" {
+					// TODO better text
+					m.inputError = errors.New("cannot be empty")
 				} else {
-					m.inputValid = true
-					cmd = zipBackupDir(m.commonState.backupDir, absFile)
+					absFile, err := getAbsPath(file)
+					if err != nil {
+						m.inputError = err
+					} else {
+						m.inputError = nil
+						cmd = zipBackupDir(m.commonState.backupDir, absFile)
+					}
 				}
+			case key.Matches(msg, m.keyMap.InputCancel):
+				cmd = returnFromZip()
+			default:
+				m.textInput, cmd = m.textInput.Update(msg)
 			}
-		case key.Matches(msg, m.keyMap.Cancel):
-			cmd = returnFromZip()
+		case zipResult:
+			r := msg.result
+			if r.exitCode == 0 {
+				m.state = zipStateSuccess
+			} else {
+				m.state = zipStateError
+				m.zipResult = r
+			}
 		default:
 			m.textInput, cmd = m.textInput.Update(msg)
 		}
-	case zipResult:
-		r := msg.result
-		if r.exitCode == 0 {
-			m.success = true
-			m.successDialog = newDialogModel(m.commonState.styles, dialogOptionWithSingleButton())
-		} else {
-			m.error = r.err.Error()
+	case zipStateSuccess:
+		if msg, ok := msg.(tea.KeyMsg); ok && key.Matches(msg, m.keyMap.SuccessContinue) {
+			cmd = returnFromZip()
 		}
-	default:
-		m.textInput, cmd = m.textInput.Update(msg)
+	case zipStateError:
+		if msg, ok := msg.(tea.KeyMsg); ok && key.Matches(msg, m.keyMap.ErrorContinue) {
+			m.state = zipStateInput
+		}
 	}
+
 	return m, cmd
 }
 
 func (m *zipModel) View() string {
 	styles := m.commonState.styles
+	content := ""
 
-	if m.success {
-		return m.successDialog.View("Zip successful!", "back to main menu", "")
+	switch m.state {
+	case zipStateInput:
+		content = fmt.Sprintf(
+			"%s\n\n%s\n%s\n",
+			styles.TitleStyle.Render("Zip Backup Directory"),
+			styles.NormalTextStyle.Render("Enter filename"),
+			m.textInput.View(),
+		)
+		if m.inputError != nil {
+			content = fmt.Sprintf("%s\n%s\n", content, styles.ErrorTextStyle.Render(m.inputError.Error()))
+		}
+		content = fmt.Sprintf("%s\n%s\n", content, m.help.ShortHelpView(m.keyMap.inputKeys()))
+	case zipStateSuccess:
+		content = fmt.Sprintf(
+			"%s\n\n%s\n\n%s\n",
+			// TODO as content could maybe include here the stats, maybe how long it took, how big the resulting file is?
+			styles.TitleStyle.Render("Zip successful!"),
+			"",
+			m.help.ShortHelpView(m.keyMap.successKeys()),
+		)
+	case zipStateError:
+		// TODO prettier error message, should be show complete stdout?
+		var errText string
+		if m.zipResult.err != nil {
+			errText = m.zipResult.err.Error()
+		} else {
+			errText = m.zipResult.stdout
+		}
+		content = fmt.Sprintf(
+			"%s\n\n%s\n\n%s\n",
+			styles.TitleStyle.Render("Zip error!"),
+			styles.NormalTextStyle.Render(errText),
+			m.help.ShortHelpView(m.keyMap.errorKeys()),
+		)
 	}
 
-	content := fmt.Sprintf(
-		"%s\n\n%s\n%s\n",
-		styles.TitleStyle.Render("Zip Backup Directory"),
-		styles.NormalTextStyle.Render("Enter filename"),
-		m.textInput.View(),
-	)
-	if !m.inputValid {
-		content = fmt.Sprintf("%s\n%s\n", content, styles.ErrorTextStyle.Render("invalid filename"))
-	} else if m.error != "" {
-		content = fmt.Sprintf("%s\n%s\n", content, styles.ErrorTextStyle.Render(m.error))
-	}
-	content = fmt.Sprintf("%s\n%s\n", content, m.help.View(m.keyMap))
 	return content
 }
 
@@ -166,27 +200,43 @@ func returnFromZip() tea.Cmd {
 }
 
 type zipKeyMap struct {
-	Confirm key.Binding
-	Cancel  key.Binding
+	InputConfirm key.Binding
+	InputCancel  key.Binding
+
+	SuccessContinue key.Binding
+
+	ErrorContinue key.Binding
 }
 
 func defaultZipKeyMap() zipKeyMap {
 	return zipKeyMap{
-		Confirm: key.NewBinding(
+		InputConfirm: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "confirm"),
 		),
-		Cancel: key.NewBinding(
+		InputCancel: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "cancel"),
+		),
+		SuccessContinue: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "continue"),
+		),
+		ErrorContinue: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "continue"),
 		),
 	}
 }
 
-func (m zipKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{m.Cancel, m.Confirm}
+func (m zipKeyMap) inputKeys() []key.Binding {
+	return []key.Binding{m.InputCancel, m.InputConfirm}
 }
 
-func (m zipKeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{m.Cancel}, {m.Confirm}}
+func (m zipKeyMap) successKeys() []key.Binding {
+	return []key.Binding{m.SuccessContinue}
+}
+
+func (m zipKeyMap) errorKeys() []key.Binding {
+	return []key.Binding{m.ErrorContinue}
 }

@@ -1,6 +1,8 @@
-package internal
+package dirselect
 
 import (
+	"backup/internal/fs"
+	"backup/internal/style"
 	"errors"
 	"fmt"
 
@@ -10,11 +12,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-type dirSelectState int
+type state int
 
 const (
-	dirSelectStateInput dirSelectState = iota
-	dirSelectStateWarning
+	stateInput state = iota
+	stateWarning
 )
 
 const (
@@ -22,77 +24,80 @@ const (
 	warningParentNotExists
 )
 
-type dirSelectModel struct {
-	commonState *commonState
-	state       dirSelectState
-	inputValid  bool
-	inputError  error
-	warning     int
+type Model struct {
+	state      state
+	backupDir  string
+	inputValid bool
+	inputError error
+	warning    int
 
 	textInput textinput.Model
-	keyMap    dirSelectKeyMap
+	keyMap    keyMap
 	helpView  help.Model
+	styles    style.Styles
 }
 
-func newDirSelectModel(commonState *commonState) *dirSelectModel {
+func NewModel(backupDir string, styles style.Styles) *Model {
 	bt := textinput.New()
-	bt.Placeholder = commonState.backupDir
+	bt.Placeholder = backupDir
 	bt.CharLimit = 250
 	bt.Width = 40
 	bt.Focus()
 
 	helpView := help.New()
-	helpView.Styles = commonState.styles.HelpStyles
+	helpView.Styles = styles.HelpStyles
 	helpView.ShowAll = true
 
-	return &dirSelectModel{
-		commonState: commonState,
-		state:       dirSelectStateInput,
-		inputValid:  true,
-		inputError:  nil,
-		warning:     -1,
+	return &Model{
+		backupDir:  backupDir,
+		state:      stateInput,
+		inputValid: true,
+		inputError: nil,
+		warning:    -1,
 
 		textInput: bt,
-		keyMap:    defaultDirSelectKeyMap(),
+		keyMap:    defaultKeyMap(),
 		helpView:  helpView,
+
+		styles: styles,
 	}
 }
 
-func (m *dirSelectModel) Init() tea.Cmd {
+func (m *Model) Init() tea.Cmd {
 	// TODO need to call init on Help?
 	return textinput.Blink
 }
 
-func (m *dirSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch m.state {
-	case dirSelectStateInput:
+	case stateInput:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch {
-			case key.Matches(msg, m.keyMap.Confirm):
+			case key.Matches(msg, m.keyMap.confirm):
 				path := m.textInput.Value()
 				if path == "" {
 					m.inputValid = false
 					m.inputError = errors.New("path cannot be empty")
-				} else if absPath, err := getAbsPath(path); err != nil {
+				} else if absPath, err := fs.GetAbsPath(path); err != nil {
 					m.inputValid = false
 					m.inputError = err
 				} else {
-					empty, err := isDirEmpty(absPath)
+					empty, err := fs.IsDirEmpty(absPath)
 					if err != nil {
 						m.inputValid = false
 						m.inputError = err
 					} else if empty {
-						exists, err := dirExists(getParentPath(absPath))
+						exists, err := fs.DirExists(fs.GetParentPath(absPath))
 						if err != nil {
 							m.inputValid = false
 							m.inputError = err
 						} else if !exists {
 							m.inputValid = true
 							m.inputError = nil
-							m.state = dirSelectStateWarning
+							m.state = stateWarning
 							m.warning = warningParentNotExists
 						} else {
 							m.inputValid = true
@@ -106,11 +111,11 @@ func (m *dirSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} else {
 						// TODO factor this out into a common method
 						// probably want to refactor this whole code anyway all these if elses are kinda ugly, what is a better way to do it?
-						m.state = dirSelectStateWarning
+						m.state = stateWarning
 						m.warning = warningDirNotEmpty
 					}
 				}
-			case key.Matches(msg, m.keyMap.Cancel):
+			case key.Matches(msg, m.keyMap.cancel):
 				cmd = returnBackupDir("")
 			default:
 				m.textInput, cmd = m.textInput.Update(msg)
@@ -118,41 +123,41 @@ func (m *dirSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			m.textInput, cmd = m.textInput.Update(msg)
 		}
-	case dirSelectStateWarning:
+	case stateWarning:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch {
-			case key.Matches(msg, m.keyMap.WarningConfirm):
+			case key.Matches(msg, m.keyMap.warningConfirm):
 				// TODO don't recompute abs path again, need to store it above
-				absPath, _ := getAbsPath(m.textInput.Value())
+				absPath, _ := fs.GetAbsPath(m.textInput.Value())
 				cmd = returnBackupDir(absPath)
-			case key.Matches(msg, m.keyMap.WarningCancel):
-				m.state = dirSelectStateInput
+			case key.Matches(msg, m.keyMap.warningCancel):
+				m.state = stateInput
 			}
 		}
 	}
 	return m, cmd
 }
 
-func (m *dirSelectModel) View() string {
+func (m *Model) View() string {
 	// TODO a common type of rendering is with a title content and help at the bottom
 	// maybe make a function for that, so we don't have to repeat the same pattern over and over?
-	styles := m.commonState.styles
+	styles := m.styles
 	content := ""
 
 	switch m.state {
-	case dirSelectStateInput:
+	case stateInput:
 		content = fmt.Sprintf(
 			"%s\n\n%s\n%s\n",
 			styles.TitleStyle.Render("Change Backup Directory"),
-			styles.NormalTextStyle.Render(fmt.Sprintf("Current: %s", m.commonState.backupDir)),
+			styles.NormalTextStyle.Render(fmt.Sprintf("Current: %s", m.backupDir)),
 			m.textInput.View(),
 		)
 		if !m.inputValid {
 			content = fmt.Sprintf("%s\n%s\n", content, styles.ErrorTextStyle.Render(m.inputError.Error()))
 		}
 		content = fmt.Sprintf("%s\n%s\n", content, m.helpView.ShortHelpView(m.keyMap.inputKeys()))
-	case dirSelectStateWarning:
+	case stateWarning:
 		// TODO better text here pls
 		// TODO probably we should show the currently selected abs path also here -> create a field on model
 		var warningText string
@@ -176,50 +181,50 @@ func (m *dirSelectModel) View() string {
 	return content
 }
 
-type dirSelectDone struct {
+type Done struct {
 	// empty if backup directory was not changed
-	backupDir string
+	BackupDir string
 }
 
 func returnBackupDir(backupDir string) tea.Cmd {
 	return func() tea.Msg {
-		return dirSelectDone{backupDir: backupDir}
+		return Done{BackupDir: backupDir}
 	}
 }
 
-type dirSelectKeyMap struct {
-	Confirm key.Binding
-	Cancel  key.Binding
+type keyMap struct {
+	confirm key.Binding
+	cancel  key.Binding
 
-	WarningConfirm key.Binding
-	WarningCancel  key.Binding
+	warningConfirm key.Binding
+	warningCancel  key.Binding
 }
 
-func defaultDirSelectKeyMap() dirSelectKeyMap {
-	return dirSelectKeyMap{
-		Confirm: key.NewBinding(
+func defaultKeyMap() keyMap {
+	return keyMap{
+		confirm: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "confirm"),
 		),
-		Cancel: key.NewBinding(
+		cancel: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "cancel"),
 		),
-		WarningConfirm: key.NewBinding(
+		warningConfirm: key.NewBinding(
 			key.WithKeys("enter", "y"),
 			key.WithHelp("enter/y", "yes"),
 		),
-		WarningCancel: key.NewBinding(
+		warningCancel: key.NewBinding(
 			key.WithKeys("esc", "n"),
 			key.WithHelp("esc/n", "no"),
 		),
 	}
 }
 
-func (m dirSelectKeyMap) inputKeys() []key.Binding {
-	return []key.Binding{m.Cancel, m.Confirm}
+func (m keyMap) inputKeys() []key.Binding {
+	return []key.Binding{m.cancel, m.confirm}
 }
 
-func (m dirSelectKeyMap) warningKeys() []key.Binding {
-	return []key.Binding{m.WarningCancel, m.WarningConfirm}
+func (m keyMap) warningKeys() []key.Binding {
+	return []key.Binding{m.warningCancel, m.warningConfirm}
 }

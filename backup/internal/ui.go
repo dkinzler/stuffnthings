@@ -1,8 +1,15 @@
 package internal
 
 import (
+	"backup/internal/dirselect"
+	"backup/internal/fs"
+	"backup/internal/github"
+	"backup/internal/style"
+	"backup/internal/zip"
+	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -16,59 +23,60 @@ import (
 // - add a state constant, a field for the model pointer in the mainMenuModel struct and add appropriate cases to the Update method
 // - add a mainMenuItem constant, update the global mainMenuItems variable and update the Render method of mainMenuItemDelegate
 
-// TODO if we don't use separate packages maybe rename thisi to mainMenuState?
-// and rename the entries to mainMenuStateDirSelect etc?
-// these get kinda ugly, why not use separate packages?
 type state int
 
 const (
-	mainMenu state = iota
-	dirSelect
-	zip
-	github
-	exTest
+	stateMainMenu state = iota
+	stateDirSelect
+	stateZip
+	stateGithub
+	stateExTest
 )
 
+// TODO refactor this comment to say taht could create a CommonState struct in another package that can then be shared among most models instead of passing arguments to each
 // Most UI models/components will need this information.
 // Note:
 // - another approach would be to pass these values individually whenever a new child model is created
 // - cannot have a child model in a separate package since that would create an import cycle, would need to move commonState to its own package
-type commonState struct {
-	backupDir string
-	styles    styles
-}
 
-type mainMenuModel struct {
-	state       state
-	commonState *commonState
+type model struct {
+	config config
+	// TODO make this part of common config struct? why not, only set backupDir if it is not in config file
+	backupDir string
+
+	state state
 	// whether or not to show the confirm quit dialog
 	confirmQuit bool
 
-	mainMenuList         list.Model
+	mainMenu             list.Model
 	mainMenuItemDelegate *mainMenuItemDelegate
 	helpView             help.Model
-	keyMap               mainMenuKeyMap
+	keyMap               keyMap
 
-	dirSelectModel   *dirSelectModel
-	zipModel         *zipModel
-	confirmQuitModel *dialogModel
-	exModel          *exModel
+	dirSelectModel *dirselect.Model
+	zipModel       *zip.Model
+	githubModel    *github.Model
+	exModel        *exModel
+
+	styles style.Styles
 }
 
-func NewMainMenuModel() *mainMenuModel {
-	backupDir, err := defaultBackupDir()
+func NewModel() *model {
+	config, err := loadConfig("config.json")
+	if err != nil {
+		// TODO we could show a little screen here instead e.g. add a state configError etc.
+		panic(err)
+	}
+
+	backupDir, err := fs.DefaultBackupDir()
 	if err != nil {
 		panic(err)
 	}
-	styles := defaultStyles()
-	commonState := &commonState{
-		backupDir: backupDir,
-		styles:    styles,
-	}
+	styles := style.DefaultStyles()
 
-	keyMap := defaultMainMenuKeyMap()
+	keyMap := defaultKeyMap()
 
-	itemDelegate := &mainMenuItemDelegate{commonState: commonState}
+	itemDelegate := &mainMenuItemDelegate{backupDir: backupDir, styles: styles}
 	list := list.New(mainMenuItems, itemDelegate, 0, 0)
 	list.SetFilteringEnabled(false)
 	list.SetShowHelp(false)
@@ -81,12 +89,14 @@ func NewMainMenuModel() *mainMenuModel {
 	helpView := help.New()
 	helpView.Styles = styles.HelpStyles
 
-	return &mainMenuModel{
-		state:       mainMenu,
-		commonState: commonState,
+	return &model{
+		config:    config,
+		backupDir: backupDir,
+
+		state:       stateMainMenu,
 		confirmQuit: false,
 
-		mainMenuList:         list,
+		mainMenu:             list,
 		mainMenuItemDelegate: itemDelegate,
 		helpView:             helpView,
 		keyMap:               keyMap,
@@ -95,16 +105,19 @@ func NewMainMenuModel() *mainMenuModel {
 		// but it can sometimes be useful to know the concrete types e.g. to call a method not part of the tea.Model interface.
 		dirSelectModel: nil,
 		zipModel:       nil,
+		githubModel:    nil,
 		exModel:        nil,
+
+		styles: styles,
 	}
 }
 
-func (m *mainMenuModel) Init() tea.Cmd {
+func (m *model) Init() tea.Cmd {
 	// TODO do we need to call Init on list and helpview?
 	return nil
 }
 
-func (m *mainMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.confirmQuit {
 		// process any other messages as usual e.g. inner models might have async commands running that might return a message while the confirm quit dialog is still open
 		switch msg := msg.(type) {
@@ -138,93 +151,100 @@ func (m *mainMenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch m.state {
 
-	case mainMenu:
+	case stateMainMenu:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch {
 			case key.Matches(msg, m.keyMap.Select):
-				s := int(m.mainMenuList.SelectedItem().(mainMenuItem))
+				s := int(m.mainMenu.SelectedItem().(mainMenuItem))
 				switch s {
 				// TODO call setSize for inner models that need it
 				case mainMenuItemDirSelect:
-					m.state = dirSelect
-					m.dirSelectModel = newDirSelectModel(m.commonState)
+					m.state = stateDirSelect
+					m.dirSelectModel = dirselect.NewModel(m.backupDir, m.styles)
 					cmd = m.dirSelectModel.Init()
 				case mainMenuItemExTest:
-					m.state = exTest
-					m.exModel = newExModel(m.commonState.styles)
+					m.state = stateExTest
+					m.exModel = newExModel(m.styles)
 					cmd = m.exModel.Init()
 				case mainMenuItemZip:
-					m.state = zip
-					m.zipModel = newZipModel(m.commonState)
+					m.state = stateZip
+					m.zipModel = zip.NewModel(m.backupDir, m.styles)
 					cmd = m.zipModel.Init()
 				case mainMenuItemGithub:
-					// m.state = Github
-					// m.githubModel = github.NewModel(m.backupDir, m.styles)
+					m.state = stateGithub
+					m.githubModel = github.NewModel(m.backupDir, m.config.GithubToken, m.styles)
+					// TODO we need to store viewWidth and height here?
 					// m.githubModel.SetSize(m.viewWidth, m.viewHeight)
-					// cmd = m.githubModel.Init()
+					// this is a hack
+					cmd = tea.Batch(m.githubModel.Init(), tea.WindowSize())
 				}
 				return m, cmd
 			}
 		}
-		m.mainMenuList, cmd = m.mainMenuList.Update(msg)
+		m.mainMenu, cmd = m.mainMenu.Update(msg)
 
-	case dirSelect:
+	case stateDirSelect:
 		switch msg := msg.(type) {
-		case dirSelectDone:
-			if msg.backupDir != "" {
-				m.commonState.backupDir = msg.backupDir
+		case dirselect.Done:
+			if msg.BackupDir != "" {
+				m.backupDir = msg.BackupDir
+				// TODO this would be less annoying with a shared pointer to a struct, but oh well
+				m.mainMenuItemDelegate.backupDir = m.backupDir
 			}
 			m.dirSelectModel = nil
-			m.state = mainMenu
+			m.state = stateMainMenu
 		default:
 			_, cmd = m.dirSelectModel.Update(msg)
 		}
-	case exTest:
+	case stateExTest:
 		switch msg := msg.(type) {
 		default:
 			_, cmd = m.exModel.Update(msg)
 		}
-	case zip:
+	case stateZip:
 		switch msg := msg.(type) {
-		case zipDone:
+		case zip.Done:
 			m.zipModel = nil
-			m.state = mainMenu
+			m.state = stateMainMenu
 		default:
 			_, cmd = m.zipModel.Update(msg)
 		}
-	case github:
-		// switch msg := msg.(type) {
-		// case github.Done:
-		// 	m.githubModel = nil
-		// 	m.state = MainMenu
-		// default:
-		// 	_, cmd = m.githubModel.Update(msg)
-		// }
+	case stateGithub:
+		switch msg := msg.(type) {
+		case github.Done:
+			m.githubModel = nil
+			m.state = stateMainMenu
+		default:
+			_, cmd = m.githubModel.Update(msg)
+		}
 	}
 	return m, cmd
 }
 
-func (m *mainMenuModel) SetSize(width, height int) {
+func (m *model) SetSize(width, height int) {
 	// title takes 2 lines, help takes 3 lines, including empty lines and global margin/padding takes some space
-	w, h := m.commonState.styles.ViewStyle.GetFrameSize()
+	w, h := m.styles.ViewStyle.GetFrameSize()
 	// TODO name this innerHeight and innerWidth?
-	height = height - h - 5
-	if height > 9 {
-		height = 9
+	innerHeight := height - h - 5
+	if innerHeight > 9 {
+		innerHeight = 9
 	}
-	if height < 0 {
-		height = 2
+	if innerHeight < 0 {
+		innerHeight = 2
 	}
-	width = width - w
-	m.mainMenuList.SetSize(width, height)
-	m.helpView.Width = width
-	// TODO if in inner model call SetSize on child model
+	innerWidth := width - w
+	m.mainMenu.SetSize(innerWidth, innerHeight)
+	m.helpView.Width = innerWidth
+	if m.githubModel != nil {
+		m.githubModel.SetSize(width-w, height-h)
+	}
+	// TODO call for other models that have SetSize
 }
 
-func (m *mainMenuModel) View() string {
+func (m *model) View() string {
 	var content string
-	styles := m.commonState.styles
+	styles := m.styles
 
 	if m.confirmQuit {
 		content = fmt.Sprintf(
@@ -238,26 +258,27 @@ func (m *mainMenuModel) View() string {
 	}
 
 	switch m.state {
-	case mainMenu:
+	case stateMainMenu:
 		content = fmt.Sprintf(
 			"%s\n\n%s\n\n%s\n",
 			styles.TitleStyle.Render("Backup"),
-			m.mainMenuList.View(),
+			m.mainMenu.View(),
 			m.helpView.FullHelpView(m.keyMap.mainMenuKeys()),
 		)
-	case dirSelect:
+	case stateDirSelect:
 		content = m.dirSelectModel.View()
-	case exTest:
+	case stateExTest:
 		content = m.exModel.View()
-	case zip:
+	case stateZip:
 		content = m.zipModel.View()
-	case github:
-		// content = m.githubModel.View()
+	case stateGithub:
+		content = m.githubModel.View()
 	}
 	return styles.ViewStyle.Render(content)
 }
 
-type mainMenuKeyMap struct {
+// TODO unexport these
+type keyMap struct {
 	CursorUp    key.Binding
 	CursorDown  key.Binding
 	Select      key.Binding
@@ -266,8 +287,8 @@ type mainMenuKeyMap struct {
 	CancelQuit  key.Binding
 }
 
-func defaultMainMenuKeyMap() mainMenuKeyMap {
-	return mainMenuKeyMap{
+func defaultKeyMap() keyMap {
+	return keyMap{
 		CursorUp: key.NewBinding(
 			key.WithKeys("k"),
 			key.WithHelp("k", "up"),
@@ -285,17 +306,17 @@ func defaultMainMenuKeyMap() mainMenuKeyMap {
 			key.WithHelp("q/ctrl+c", "quit"),
 		),
 		ConfirmQuit: key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "yes"),
+			key.WithKeys("enter", "y"),
+			key.WithHelp("enter/y", "yes"),
 		),
 		CancelQuit: key.NewBinding(
-			key.WithKeys("esc"),
-			key.WithHelp("esc", "no"),
+			key.WithKeys("esc", "n"),
+			key.WithHelp("esc/n", "no"),
 		),
 	}
 }
 
-func (m mainMenuKeyMap) listKeyMap() list.KeyMap {
+func (m keyMap) listKeyMap() list.KeyMap {
 	return list.KeyMap{
 		CursorUp:             m.CursorUp,
 		CursorDown:           m.CursorDown,
@@ -312,14 +333,14 @@ func (m mainMenuKeyMap) listKeyMap() list.KeyMap {
 	}
 }
 
-func (m mainMenuKeyMap) mainMenuKeys() [][]key.Binding {
+func (m keyMap) mainMenuKeys() [][]key.Binding {
 	return [][]key.Binding{
 		{m.CursorUp, m.CursorDown},
 		{m.Select, m.Quit},
 	}
 }
 
-func (m mainMenuKeyMap) confirmQuitKeys() []key.Binding {
+func (m keyMap) confirmQuitKeys() []key.Binding {
 	return []key.Binding{m.CancelQuit, m.ConfirmQuit}
 }
 
@@ -354,7 +375,8 @@ var mainMenuItems = []list.Item{
 }
 
 type mainMenuItemDelegate struct {
-	commonState *commonState
+	backupDir string
+	styles    style.Styles
 }
 
 func (d mainMenuItemDelegate) Height() int {
@@ -373,9 +395,9 @@ func (d mainMenuItemDelegate) Render(w io.Writer, m list.Model, index int, listI
 	item := int(listItem.(mainMenuItem))
 
 	// TODO make these more consistent, i.e. add all these classes already to Styles struct
-	itemTitleStyle := d.commonState.styles.NormalTextStyle
-	itemDescriptionStyle := d.commonState.styles.NormalTextStyle.Faint(true)
-	selectedItemStyle := d.commonState.styles.SelectedListItemStyle
+	itemTitleStyle := d.styles.NormalTextStyle
+	itemDescriptionStyle := d.styles.NormalTextStyle.Faint(true)
+	selectedItemStyle := d.styles.SelectedListItemStyle
 
 	var title string
 	var description string
@@ -383,7 +405,7 @@ func (d mainMenuItemDelegate) Render(w io.Writer, m list.Model, index int, listI
 	switch item {
 	case mainMenuItemDirSelect:
 		title = "Change Backup Directory"
-		description = d.commonState.backupDir
+		description = d.backupDir
 	case mainMenuItemZip:
 		title = "Zip"
 		description = "Zip Backup Directory"
@@ -403,4 +425,22 @@ func (d mainMenuItemDelegate) Render(w io.Writer, m list.Model, index int, listI
 	}
 
 	fmt.Fprintf(w, s)
+}
+
+type config struct {
+	GithubToken string `json:"githubToken"`
+}
+
+// TODO add cfg file parameter to cli arguments
+// TODO should we be able to start without a config file argument, i.e. when no explicit file is provided we try
+// the default path and if nothing is there we just continue
+// but if a file was provided explicitely we will fail if it doesn't exist or is not valid json
+func loadConfig(configFile string) (config, error) {
+	var config config
+	s, err := os.ReadFile(configFile)
+	if err != nil {
+		return config, err
+	}
+	err = json.Unmarshal(s, &config)
+	return config, err
 }

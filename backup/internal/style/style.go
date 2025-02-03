@@ -1,11 +1,11 @@
-package internal
+package style
 
 import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/lipgloss"
 )
 
-type styles struct {
+type Styles struct {
 	ViewStyle             lipgloss.Style
 	TitleStyle            lipgloss.Style
 	NormalTextStyle       lipgloss.Style
@@ -14,7 +14,7 @@ type styles struct {
 	HelpStyles            help.Styles
 }
 
-func defaultStyles() styles {
+func DefaultStyles() Styles {
 	// copied these styles from the charmbracelet/bubbles/help package
 	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{
 		Light: "#909090",
@@ -40,7 +40,7 @@ func defaultStyles() styles {
 		FullSeparator:  sepStyle,
 	}
 
-	return styles{
+	return Styles{
 		ViewStyle:             lipgloss.NewStyle().Margin(1),
 		TitleStyle:            lipgloss.NewStyle().Bold(true).Padding(0, 3).Background(lipgloss.Color("#fc03ec")).Foreground(lipgloss.Color("#ffffff")),
 		NormalTextStyle:       lipgloss.NewStyle(),

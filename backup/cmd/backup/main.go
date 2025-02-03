@@ -42,7 +42,7 @@ func run(logFile string) error {
 	defer f.Close()
 	log.SetOutput(f)
 
-	p := tea.NewProgram(internal.NewMainMenuModel(), tea.WithAltScreen())
+	p := tea.NewProgram(internal.NewModel(), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		return err
 	}

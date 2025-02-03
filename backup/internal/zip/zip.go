@@ -1,6 +1,9 @@
-package internal
+package zip
 
 import (
+	"backup/internal/exec"
+	"backup/internal/fs"
+	"backup/internal/style"
 	"errors"
 	"fmt"
 
@@ -10,110 +13,113 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-type zipState int
+type state int
 
 const (
-	zipStateInput zipState = iota
-	// TODO could have had a separate state zipStateZipping but not really necessary?
+	stateInput state = iota
+	// TODO could have had a separate stateZipping but not really necessary?
 	// maybe for completeness so that we can't spam keys and cause another zip to happen?
 	// although that is unlikely, but why not do it
-	zipStateSuccess
-	zipStateError
+	stateSuccess
+	stateError
 )
 
-type zipModel struct {
-	commonState *commonState
-	state       zipState
-	inputError  error
-	zipResult   execResult
+type Model struct {
+	state      state
+	backupDir  string
+	inputError error
+	result     exec.Result
 
-	keyMap zipKeyMap
+	keyMap keyMap
 
 	textInput textinput.Model
 	help      help.Model
+
+	styles style.Styles
 }
 
-func newZipModel(commonState *commonState) *zipModel {
+func NewModel(backupDir string, styles style.Styles) *Model {
 	zt := textinput.New()
 	zt.CharLimit = 250
 	zt.Width = 40
 	zt.Focus()
 
 	help := help.New()
-	help.Styles = commonState.styles.HelpStyles
+	help.Styles = styles.HelpStyles
 
-	return &zipModel{
-		commonState: commonState,
-		state:       zipStateInput,
-		inputError:  nil,
-		keyMap:      defaultZipKeyMap(),
-		textInput:   zt,
-		help:        help,
+	return &Model{
+		state:      stateInput,
+		backupDir:  backupDir,
+		inputError: nil,
+		keyMap:     defaultKeyMap(),
+		textInput:  zt,
+		help:       help,
+		styles:     styles,
 	}
 }
 
-func (m *zipModel) Init() tea.Cmd {
+func (m *Model) Init() tea.Cmd {
 	// TODO do we need to init help or textinput?
 	return nil
 }
 
-func (m *zipModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch m.state {
-	case zipStateInput:
+	case stateInput:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch {
-			case key.Matches(msg, m.keyMap.InputConfirm):
+			case key.Matches(msg, m.keyMap.inputConfirm):
 				file := m.textInput.Value()
 				if file == "" {
 					// TODO better text
 					m.inputError = errors.New("cannot be empty")
 				} else {
-					absFile, err := getAbsPath(file)
+					absFile, err := fs.GetAbsPath(file)
 					if err != nil {
 						m.inputError = err
 					} else {
 						m.inputError = nil
-						cmd = zipBackupDir(m.commonState.backupDir, absFile)
+						cmd = zipBackupDir(m.backupDir, absFile)
 					}
 				}
-			case key.Matches(msg, m.keyMap.InputCancel):
+			case key.Matches(msg, m.keyMap.inputCancel):
 				cmd = returnFromZip()
 			default:
 				m.textInput, cmd = m.textInput.Update(msg)
 			}
 		case zipResult:
 			r := msg.result
-			if r.exitCode == 0 {
-				m.state = zipStateSuccess
+			if r.ExitCode == 0 {
+				m.state = stateSuccess
 			} else {
-				m.state = zipStateError
-				m.zipResult = r
+				m.state = stateError
+				m.result = r
 			}
 		default:
 			m.textInput, cmd = m.textInput.Update(msg)
 		}
-	case zipStateSuccess:
-		if msg, ok := msg.(tea.KeyMsg); ok && key.Matches(msg, m.keyMap.SuccessContinue) {
+	case stateSuccess:
+		if msg, ok := msg.(tea.KeyMsg); ok && key.Matches(msg, m.keyMap.successContinue) {
 			cmd = returnFromZip()
 		}
-	case zipStateError:
-		if msg, ok := msg.(tea.KeyMsg); ok && key.Matches(msg, m.keyMap.ErrorContinue) {
-			m.state = zipStateInput
+	case stateError:
+		if msg, ok := msg.(tea.KeyMsg); ok && key.Matches(msg, m.keyMap.errorContinue) {
+			m.state = stateInput
 		}
 	}
 
 	return m, cmd
 }
 
-func (m *zipModel) View() string {
-	styles := m.commonState.styles
+func (m *Model) View() string {
+	styles := m.styles
 	content := ""
 
 	switch m.state {
-	case zipStateInput:
+	case stateInput:
 		content = fmt.Sprintf(
 			"%s\n\n%s\n%s\n",
 			styles.TitleStyle.Render("Zip Backup Directory"),
@@ -124,7 +130,7 @@ func (m *zipModel) View() string {
 			content = fmt.Sprintf("%s\n%s\n", content, styles.ErrorTextStyle.Render(m.inputError.Error()))
 		}
 		content = fmt.Sprintf("%s\n%s\n", content, m.help.ShortHelpView(m.keyMap.inputKeys()))
-	case zipStateSuccess:
+	case stateSuccess:
 		content = fmt.Sprintf(
 			"%s\n\n%s\n\n%s\n",
 			// TODO as content could maybe include here the stats, maybe how long it took, how big the resulting file is?
@@ -132,13 +138,13 @@ func (m *zipModel) View() string {
 			"",
 			m.help.ShortHelpView(m.keyMap.successKeys()),
 		)
-	case zipStateError:
+	case stateError:
 		// TODO prettier error message, should be show complete stdout?
 		var errText string
-		if m.zipResult.err != nil {
-			errText = m.zipResult.err.Error()
+		if m.result.Err != nil {
+			errText = m.result.Err.Error()
 		} else {
-			errText = m.zipResult.stdout
+			errText = m.result.Stdout
 		}
 		content = fmt.Sprintf(
 			"%s\n\n%s\n\n%s\n",
@@ -152,7 +158,7 @@ func (m *zipModel) View() string {
 }
 
 type zipResult struct {
-	result execResult
+	result exec.Result
 }
 
 // TODO fix
@@ -183,60 +189,60 @@ func zipBackupDir(dir string, file string) tea.Cmd {
 	// TODO what happens if we pass something like / to zip as the output file, would this work?
 	// or more generally if we pass an existing directory, or will it always add an .zip ending? try it out
 	// that should be fine, it will add .zip and if there already is a dir with the name .zip it will try to use it and fail
-	base := getBasePath(dir)
-	parent := getParentPath(dir)
+	base := fs.GetBasePath(dir)
+	parent := fs.GetParentPath(dir)
 	cmd := []string{"sh", "-c", fmt.Sprintf("cd %s && zip -r %s %s", parent, file, base)}
-	return execForeground(cmd, func(er execResult) tea.Msg {
+	return exec.Foreground(cmd, func(er exec.Result) tea.Msg {
 		return zipResult{result: er}
-	}, defaultExecOptions())
+	}, exec.DefaultOptions())
 }
 
-type zipDone struct{}
+type Done struct{}
 
 func returnFromZip() tea.Cmd {
 	return func() tea.Msg {
-		return zipDone{}
+		return Done{}
 	}
 }
 
-type zipKeyMap struct {
-	InputConfirm key.Binding
-	InputCancel  key.Binding
+type keyMap struct {
+	inputConfirm key.Binding
+	inputCancel  key.Binding
 
-	SuccessContinue key.Binding
+	successContinue key.Binding
 
-	ErrorContinue key.Binding
+	errorContinue key.Binding
 }
 
-func defaultZipKeyMap() zipKeyMap {
-	return zipKeyMap{
-		InputConfirm: key.NewBinding(
+func defaultKeyMap() keyMap {
+	return keyMap{
+		inputConfirm: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "confirm"),
 		),
-		InputCancel: key.NewBinding(
+		inputCancel: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "cancel"),
 		),
-		SuccessContinue: key.NewBinding(
+		successContinue: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "continue"),
 		),
-		ErrorContinue: key.NewBinding(
+		errorContinue: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "continue"),
 		),
 	}
 }
 
-func (m zipKeyMap) inputKeys() []key.Binding {
-	return []key.Binding{m.InputCancel, m.InputConfirm}
+func (m keyMap) inputKeys() []key.Binding {
+	return []key.Binding{m.inputCancel, m.inputConfirm}
 }
 
-func (m zipKeyMap) successKeys() []key.Binding {
-	return []key.Binding{m.SuccessContinue}
+func (m keyMap) successKeys() []key.Binding {
+	return []key.Binding{m.successContinue}
 }
 
-func (m zipKeyMap) errorKeys() []key.Binding {
-	return []key.Binding{m.ErrorContinue}
+func (m keyMap) errorKeys() []key.Binding {
+	return []key.Binding{m.errorContinue}
 }

@@ -1,6 +1,8 @@
 package internal
 
 import (
+	"backup/internal/exec"
+	"backup/internal/style"
 	"fmt"
 	"strings"
 
@@ -18,10 +20,10 @@ type exModel struct {
 	exitCode int
 	err      error
 
-	styles styles
+	styles style.Styles
 }
 
-func newExModel(styles styles) *exModel {
+func newExModel(styles style.Styles) *exModel {
 	bt := textinput.New()
 	bt.Placeholder = ""
 	bt.CharLimit = 250
@@ -58,12 +60,12 @@ func (m *exModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case commandExecuted:
-		m.exitCode = msg.result.exitCode
-		m.err = msg.result.err
-		m.outputView.SetContent(msg.result.stdout)
-		m.errView.SetContent(msg.result.stderr)
-		fmt.Println(msg.result.stdout)
-		fmt.Println(msg.result.stderr)
+		m.exitCode = msg.result.ExitCode
+		m.err = msg.result.Err
+		m.outputView.SetContent(msg.result.Stdout)
+		m.errView.SetContent(msg.result.Stderr)
+		fmt.Println(msg.result.Stdout)
+		fmt.Println(msg.result.Stderr)
 		return m, nil
 	}
 
@@ -76,9 +78,9 @@ func (m *exModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.outputView.SetContent("")
 				m.errView.SetContent("")
 				parts := strings.Split(m.cmdInput.Value(), " ")
-				return m, execForeground(parts, func(er execResult) tea.Msg {
+				return m, exec.Foreground(parts, func(er exec.Result) tea.Msg {
 					return commandExecuted{result: er}
-				}, execOptions{returnStdout: true, returnStderr: true})
+				}, exec.DefaultOptions())
 			}
 		}
 		m.cmdInput, cmd = m.cmdInput.Update(msg)
@@ -91,7 +93,7 @@ func (m *exModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 type commandExecuted struct {
-	result execResult
+	result exec.Result
 }
 
 func (m *exModel) View() string {

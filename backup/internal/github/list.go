@@ -14,10 +14,10 @@ type RepoList struct {
 	repos        []Repo
 	list         list.Model
 	listDelegate *itemDelegate
-	keyMap       reposLoadedKeyMap
+	keyMap       keyMap
 }
 
-func NewList(repos []Repo, keyMap reposLoadedKeyMap) *RepoList {
+func NewList(repos []Repo, keyMap keyMap) *RepoList {
 	items := make([]list.Item, len(repos))
 	for i, r := range repos {
 		items[i] = r
@@ -63,7 +63,7 @@ func (l *RepoList) Update(msg tea.Msg) tea.Cmd {
 		case key.Matches(msg, l.keyMap.SelectAll):
 			if len(l.listDelegate.Selected) > 0 {
 				// unselect all
-				l.listDelegate.Selected = map[string]struct{}{}
+				l.listDelegate.Selected = map[int]struct{}{}
 			} else {
 				// select all
 				for _, repo := range l.repos {
@@ -98,21 +98,21 @@ func (l *RepoList) Selected() []Repo {
 }
 
 func (r Repo) FilterValue() string {
-	return r.Id
+	return r.Name
 }
 
 type itemDelegate struct {
 	itemStyle         lipgloss.Style
 	selectedItemStyle lipgloss.Style
 
-	Selected map[string]struct{}
+	Selected map[int]struct{}
 }
 
 func NewItemDelegate() *itemDelegate {
 	return &itemDelegate{
 		itemStyle:         lipgloss.NewStyle().PaddingLeft(4),
 		selectedItemStyle: lipgloss.NewStyle().PaddingLeft(2).Foreground(lipgloss.Color("170")),
-		Selected:          map[string]struct{}{},
+		Selected:          map[int]struct{}{},
 	}
 }
 

@@ -1,4 +1,4 @@
-package internal
+package fs
 
 import (
 	"errors"
@@ -11,7 +11,7 @@ import (
 )
 
 // Returns true if the given directory does not exist or is empty.
-func isDirEmpty(dir string) (bool, error) {
+func IsDirEmpty(dir string) (bool, error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -22,7 +22,7 @@ func isDirEmpty(dir string) (bool, error) {
 	return len(files) == 0, nil
 }
 
-func dirExists(dir string) (bool, error) {
+func DirExists(dir string) (bool, error) {
 	info, err := os.Stat(dir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -36,24 +36,24 @@ func dirExists(dir string) (bool, error) {
 	return true, nil
 }
 
-func createDir(dir string) error {
+func CreateDir(dir string) error {
 	err := os.MkdirAll(dir, 0775)
 	return err
 }
 
-func joinPath(a, b string) string {
+func JoinPath(a, b string) string {
 	return filepath.Join(a, b)
 }
 
-func getParentPath(path string) string {
+func GetParentPath(path string) string {
 	return filepath.Dir(filepath.Clean(path))
 }
 
-func getBasePath(path string) string {
+func GetBasePath(path string) string {
 	return filepath.Base(filepath.Clean(path))
 }
 
-func getAbsPath(path string) (string, error) {
+func GetAbsPath(path string) (string, error) {
 	path = filepath.Clean(path)
 	switch {
 	case path == "~":
@@ -79,7 +79,7 @@ func getAbsPath(path string) (string, error) {
 	}
 }
 
-func defaultBackupDir() (string, error) {
+func DefaultBackupDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err

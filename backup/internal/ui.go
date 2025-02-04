@@ -17,36 +17,34 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// How to add a new component
-// - model should be returned as a pointer and create a "Done" message to exit back to the main menu, see dirselect.go for a simple example
-//   - if your model needs window size updates, add a SetSize method and call it in mainMenuModel.Update(), you will also need to call SetSize once when the child model is created
-// - add a state constant, a field for the model pointer in the mainMenuModel struct and add appropriate cases to the Update method
-// - add a mainMenuItem constant, update the global mainMenuItems variable and update the Render method of mainMenuItemDelegate
+// Notes on design
+//   - we use a separate package for every UI component to avoid naming conflicts, UI components will typically have types "state", "model", "keyMap" etc.
+//     with a single package we would need to add a qualifier to every name e.g. mainMenuKeyMap, githubKeyMap ...
+//   - we could have defined a common component to handle all dialogs e.g. to confirm an action or show an error message
+//     but overall it seems easier to just create them from scratch every time
+//     it does not take substantially more code and we always have full control over behavior and looks, especially since dialogs often need to be slightly different
+//     e.g. one or two actions, naming of actions, coloring of text etc.
+//   - components that need to know the current window size get updates via a SetSize(width, height) method
+//     the alternative would be to forward the tea.WindowSizeMsg messages to nested components
 
 type state int
 
 const (
 	stateMainMenu state = iota
+	stateConfigError
 	stateDirSelect
 	stateZip
 	stateGithub
 	stateExTest
 )
 
-// TODO refactor this comment to say taht could create a CommonState struct in another package that can then be shared among most models instead of passing arguments to each
-// Most UI models/components will need this information.
-// Note:
-// - another approach would be to pass these values individually whenever a new child model is created
-// - cannot have a child model in a separate package since that would create an import cycle, would need to move commonState to its own package
-
 type model struct {
 	config config
-	// TODO make this part of common config struct? why not, only set backupDir if it is not in config file
-	backupDir string
 
 	state state
-	// whether or not to show the confirm quit dialog
+	// if true a dialog to confirm quit will be shown
 	confirmQuit bool
+	configError error
 
 	mainMenu             list.Model
 	mainMenuItemDelegate *mainMenuItemDelegate
@@ -61,22 +59,19 @@ type model struct {
 	styles style.Styles
 }
 
-func NewModel() *model {
-	config, err := loadConfig("config.json")
-	if err != nil {
-		// TODO we could show a little screen here instead e.g. add a state configError etc.
-		panic(err)
+func NewModel(configFile string) *model {
+	initialState := stateMainMenu
+
+	config, configErr := loadConfig(configFile)
+	if configErr != nil {
+		initialState = stateConfigError
 	}
 
-	backupDir, err := fs.DefaultBackupDir()
-	if err != nil {
-		panic(err)
-	}
 	styles := style.DefaultStyles()
 
 	keyMap := defaultKeyMap()
 
-	itemDelegate := &mainMenuItemDelegate{backupDir: backupDir, styles: styles}
+	itemDelegate := &mainMenuItemDelegate{backupDir: config.BackupDir, styles: styles}
 	list := list.New(mainMenuItems, itemDelegate, 0, 0)
 	list.SetFilteringEnabled(false)
 	list.SetShowHelp(false)
@@ -90,19 +85,19 @@ func NewModel() *model {
 	helpView.Styles = styles.HelpStyles
 
 	return &model{
-		config:    config,
-		backupDir: backupDir,
+		config: config,
 
-		state:       stateMainMenu,
+		state:       initialState,
 		confirmQuit: false,
+		configError: configErr,
 
 		mainMenu:             list,
 		mainMenuItemDelegate: itemDelegate,
 		helpView:             helpView,
 		keyMap:               keyMap,
 
-		// Note: instead of keeping track of each possible child model, we could have used a single generic "innerModel" field of type tea.Model,
-		// but it can sometimes be useful to know the concrete types e.g. to call a method not part of the tea.Model interface.
+		// Note: instead of keeping track of each possible child/nested model, we could have used a single generic "innerModel" field of type tea.Model,
+		// but it can sometimes be useful to know the concrete types e.g. to call a method not part of the tea.Model interface
 		dirSelectModel: nil,
 		zipModel:       nil,
 		githubModel:    nil,
@@ -119,7 +114,7 @@ func (m *model) Init() tea.Cmd {
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.confirmQuit {
-		// process any other messages as usual e.g. inner models might have async commands running that might return a message while the confirm quit dialog is still open
+		// process any other messages as usual e.g. inner models might have async commands running that will return a message while the confirm quit dialog is still open
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch {
@@ -129,10 +124,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.confirmQuit = false
 				return m, nil
 			default:
-				// need to return, otherwise key message would be passed through
+				// return, otherwise key message would be passed through to inner model
 				return m, nil
 			}
 		}
+	} else if m.state == stateConfigError {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			if key.Matches(msg, m.keyMap.ConfigErrorContinue) {
+				return m, tea.Quit
+			}
+		}
+		return m, nil
 	}
 
 	switch msg := msg.(type) {
@@ -143,7 +146,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case tea.WindowSizeMsg:
-		// Note: instead of using SetSize on child models we could have passed the WindowSizeMsg through to them
 		m.SetSize(msg.Width, msg.Height)
 	}
 
@@ -161,7 +163,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// TODO call setSize for inner models that need it
 				case mainMenuItemDirSelect:
 					m.state = stateDirSelect
-					m.dirSelectModel = dirselect.NewModel(m.backupDir, m.styles)
+					m.dirSelectModel = dirselect.NewModel(m.config.BackupDir, m.styles)
 					cmd = m.dirSelectModel.Init()
 				case mainMenuItemExTest:
 					m.state = stateExTest
@@ -169,11 +171,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmd = m.exModel.Init()
 				case mainMenuItemZip:
 					m.state = stateZip
-					m.zipModel = zip.NewModel(m.backupDir, m.styles)
+					m.zipModel = zip.NewModel(m.config.BackupDir, m.styles)
 					cmd = m.zipModel.Init()
 				case mainMenuItemGithub:
 					m.state = stateGithub
-					m.githubModel = github.NewModel(m.backupDir, m.config.GithubToken, m.styles)
+					m.githubModel = github.NewModel(m.config.BackupDir, m.config.Github.Token, m.styles)
 					// TODO we need to store viewWidth and height here?
 					// m.githubModel.SetSize(m.viewWidth, m.viewHeight)
 					// this is a hack
@@ -188,9 +190,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg := msg.(type) {
 		case dirselect.Done:
 			if msg.BackupDir != "" {
-				m.backupDir = msg.BackupDir
+				m.config.BackupDir = msg.BackupDir
 				// TODO this would be less annoying with a shared pointer to a struct, but oh well
-				m.mainMenuItemDelegate.backupDir = m.backupDir
+				m.mainMenuItemDelegate.backupDir = m.config.BackupDir
 			}
 			m.dirSelectModel = nil
 			m.state = stateMainMenu
@@ -265,6 +267,18 @@ func (m *model) View() string {
 			m.mainMenu.View(),
 			m.helpView.FullHelpView(m.keyMap.mainMenuKeys()),
 		)
+	case stateConfigError:
+		var errText string
+		if m.configError != nil {
+			// TODO any fance error messages processing here
+			errText = m.configError.Error()
+		}
+		content = fmt.Sprintf(
+			"%s\n\n%s\n\n%s\n",
+			styles.TitleStyle.Render("Config Error"),
+			styles.ErrorTextStyle.Render(errText),
+			m.helpView.ShortHelpView(m.keyMap.configErrorKeys()),
+		)
 	case stateDirSelect:
 		content = m.dirSelectModel.View()
 	case stateExTest:
@@ -279,12 +293,13 @@ func (m *model) View() string {
 
 // TODO unexport these
 type keyMap struct {
-	CursorUp    key.Binding
-	CursorDown  key.Binding
-	Select      key.Binding
-	Quit        key.Binding
-	ConfirmQuit key.Binding
-	CancelQuit  key.Binding
+	CursorUp            key.Binding
+	CursorDown          key.Binding
+	Select              key.Binding
+	Quit                key.Binding
+	ConfirmQuit         key.Binding
+	CancelQuit          key.Binding
+	ConfigErrorContinue key.Binding
 }
 
 func defaultKeyMap() keyMap {
@@ -312,6 +327,10 @@ func defaultKeyMap() keyMap {
 		CancelQuit: key.NewBinding(
 			key.WithKeys("esc", "n"),
 			key.WithHelp("esc/n", "no"),
+		),
+		ConfigErrorContinue: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "quit"),
 		),
 	}
 }
@@ -342,6 +361,10 @@ func (m keyMap) mainMenuKeys() [][]key.Binding {
 
 func (m keyMap) confirmQuitKeys() []key.Binding {
 	return []key.Binding{m.CancelQuit, m.ConfirmQuit}
+}
+
+func (m keyMap) configErrorKeys() []key.Binding {
+	return []key.Binding{m.ConfigErrorContinue}
 }
 
 const (
@@ -428,19 +451,40 @@ func (d mainMenuItemDelegate) Render(w io.Writer, m list.Model, index int, listI
 }
 
 type config struct {
-	GithubToken string `json:"githubToken"`
+	BackupDir string `json:"backupDir"`
+	Github    struct {
+		Token string `json:"token"`
+	} `json:"github"`
 }
 
-// TODO add cfg file parameter to cli arguments
-// TODO should we be able to start without a config file argument, i.e. when no explicit file is provided we try
-// the default path and if nothing is there we just continue
-// but if a file was provided explicitely we will fail if it doesn't exist or is not valid json
 func loadConfig(configFile string) (config, error) {
 	var config config
-	s, err := os.ReadFile(configFile)
-	if err != nil {
-		return config, err
+
+	if configFile != "" {
+		s, err := os.ReadFile(configFile)
+		if err != nil {
+			return config, fmt.Errorf("could not read file: %w", err)
+		}
+		err = json.Unmarshal(s, &config)
+		if err != nil {
+			return config, fmt.Errorf("could not decode json: %w", err)
+		}
 	}
-	err = json.Unmarshal(s, &config)
-	return config, err
+
+	// validate and set defaults
+	if config.BackupDir == "" {
+		backupDir, err := fs.DefaultBackupDir()
+		if err != nil {
+			return config, fmt.Errorf("could not get default backup directory: %w", err)
+		}
+		config.BackupDir = backupDir
+	} else {
+		absPath, err := fs.GetAbsPath(config.BackupDir)
+		if err != nil {
+			return config, fmt.Errorf("invalid directory: %w", err)
+		}
+		config.BackupDir = absPath
+	}
+
+	return config, nil
 }

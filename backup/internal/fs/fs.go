@@ -84,6 +84,7 @@ func DefaultBackupDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// TODO should we convert to abs path here? even though it probably already is one?
 	date := time.Now().Format(time.DateOnly)
 	dir := fmt.Sprintf("backup-%v", date)
 	return filepath.Join(home, dir), nil

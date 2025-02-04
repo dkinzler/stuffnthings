@@ -10,16 +10,19 @@ Next steps
     * do we need to run something special to get complete "git history" when cloning? or do we always get everything?
     * otherwise it seems fine
 * make styles a global var? would be easier don't have to pass stuff around
-* comment for separate packages to ui.go
-    * otherwise it gets kind of annoying, every model has similar types so you need to add a qualifier to basically every type and function
-        e.g. every model has state and keyMap types, so you need to call them mainMenuKeyMap and githubKeyMap etc.
-    * each package can now be pretty small but this way it is easier to work with
 * should we have a global config dir that includes backupdir as well?
 * full TUI is fine and looks great, but for usability something even simpler would have probably worked better?
     * where we just have a config file and if there is e.g. a github token set then it will backup all github repos, automatically
     * so that from the config file almost everything happens automatically maybe it shows a few options and stuff on the cli, but not in full screen?
     * i mean could experiment with that later, whatever we have now is also fine, finish it
     * can then later think about it again, maybe add a non-interactive mode that does exactly that or not, whatever
+* we should maybe put config in a seperate package, that way we can pass the structs like github to the inner models, or just the complete config?
+    * or maybe even better the inner components should define their own config struct and can then combine it into the global one in ui.go -> yes, that's the right way
+* red text for error messages?
+    * prolly not
+* in general we need to standardize things across the models so it feels the same
+    * e.g. keys for continue, quit etc.
+    * text the same etc.
 * error pages
     * instead of showing detailed errors can also just give the bare minimum and refer to logs, that is probably easier because usually things shouldn't go wrong
         * especially when commands go wrong -> think about it again
@@ -37,13 +40,6 @@ Next steps
     * also need to set width on help -> we can yes? everywhere, every model a SetSize function that does this
 * for dialogs
     * can also have some functions that combine stuff e.g. a view or render function that takes title, content and keymap and applies common formatting
-    * note down somewhere that we could have done a separate dialog thing but that using an inner model is again a bit of code
-        * and that it is not much difference in total code so we keep it like this for now
-        * that is the easiest way that still gives full control
-        * could later maybe factor out a dialog if that makes sense or we see a good abstraction
-        * probably roughly the same amount of code but will feel less clunky than adapting the dialog slightly every time
-            * e.g. we always need a return message that we need to catch again in outer model anyway
-            * so that already is also a bit of code for the update function
     * remove dialog.go
 * for command error page we could instead
     * show the last lines of output and error streams

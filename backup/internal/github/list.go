@@ -11,13 +11,13 @@ import (
 )
 
 type RepoList struct {
-	repos        []Repo
+	repos        []repo
 	list         list.Model
 	listDelegate *itemDelegate
 	keyMap       keyMap
 }
 
-func NewList(repos []Repo, keyMap keyMap) *RepoList {
+func NewList(repos []repo, keyMap keyMap) *RepoList {
 	items := make([]list.Item, len(repos))
 	for i, r := range repos {
 		items[i] = r
@@ -51,7 +51,7 @@ func (l *RepoList) Update(msg tea.Msg) tea.Cmd {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, l.keyMap.Select):
-			repo, ok := l.list.SelectedItem().(Repo)
+			repo, ok := l.list.SelectedItem().(repo)
 			if ok {
 				_, selected := l.listDelegate.Selected[repo.Id]
 				if selected {
@@ -87,8 +87,8 @@ func (l *RepoList) View() string {
 	return l.list.View()
 }
 
-func (l *RepoList) Selected() []Repo {
-	var selected []Repo
+func (l *RepoList) Selected() []repo {
+	var selected []repo
 	for _, r := range l.repos {
 		if _, ok := l.listDelegate.Selected[r.Id]; ok {
 			selected = append(selected, r)
@@ -97,7 +97,7 @@ func (l *RepoList) Selected() []Repo {
 	return selected
 }
 
-func (r Repo) FilterValue() string {
+func (r repo) FilterValue() string {
 	return r.Name
 }
 
@@ -129,7 +129,7 @@ func (d itemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd {
 }
 
 func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
-	repo, ok := listItem.(Repo)
+	repo, ok := listItem.(repo)
 	if !ok {
 		return
 	}

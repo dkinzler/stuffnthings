@@ -45,15 +45,15 @@ func JoinPath(a, b string) string {
 	return filepath.Join(a, b)
 }
 
-func GetParentPath(path string) string {
+func ParentPath(path string) string {
 	return filepath.Dir(filepath.Clean(path))
 }
 
-func GetBasePath(path string) string {
+func BasePath(path string) string {
 	return filepath.Base(filepath.Clean(path))
 }
 
-func GetAbsPath(path string) (string, error) {
+func AbsPath(path string) (string, error) {
 	path = filepath.Clean(path)
 	switch {
 	case path == "~":
@@ -84,8 +84,15 @@ func DefaultBackupDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// TODO should we convert to abs path here? even though it probably already is one?
 	date := time.Now().Format(time.DateOnly)
-	dir := fmt.Sprintf("backup-%v", date)
-	return filepath.Join(home, dir), nil
+	dir := filepath.Join(home, fmt.Sprintf("backup-%v", date))
+	return AbsPath(dir)
+}
+
+func FileSize(file string) (int64, error) {
+	info, err := os.Stat(file)
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
 }

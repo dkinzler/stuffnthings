@@ -5,11 +5,13 @@ import (
 	"backup/internal/style"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type state int
@@ -19,22 +21,19 @@ const (
 	stateWarning
 )
 
-const (
-	warningDirNotEmpty = iota
-	warningParentNotExists
-)
-
 type Model struct {
-	state      state
-	backupDir  string
-	inputValid bool
+	state        state
+	oldBackupDir string
+	newBackupDir string
+
 	inputError error
 	warning    int
 
 	textInput textinput.Model
 	keyMap    keyMap
 	helpView  help.Model
-	styles    style.Styles
+
+	styles style.Styles
 }
 
 func NewModel(backupDir string, styles style.Styles) *Model {
@@ -46,14 +45,13 @@ func NewModel(backupDir string, styles style.Styles) *Model {
 
 	helpView := help.New()
 	helpView.Styles = styles.HelpStyles
-	helpView.ShowAll = true
 
 	return &Model{
-		backupDir:  backupDir,
-		state:      stateInput,
-		inputValid: true,
+		oldBackupDir: backupDir,
+		state:        stateInput,
+
 		inputError: nil,
-		warning:    -1,
+		warning:    0,
 
 		textInput: bt,
 		keyMap:    defaultKeyMap(),
@@ -64,7 +62,6 @@ func NewModel(backupDir string, styles style.Styles) *Model {
 }
 
 func (m *Model) Init() tea.Cmd {
-	// TODO need to call init on Help?
 	return textinput.Blink
 }
 
@@ -77,43 +74,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyMsg:
 			switch {
 			case key.Matches(msg, m.keyMap.confirm):
-				path := m.textInput.Value()
-				if path == "" {
-					m.inputValid = false
-					m.inputError = errors.New("path cannot be empty")
-				} else if absPath, err := fs.GetAbsPath(path); err != nil {
-					m.inputValid = false
+				absPath, err, warning := validatePath(m.textInput.Value())
+				if err != nil {
 					m.inputError = err
+					m.warning = 0
+				} else if warning != 0 {
+					m.inputError = nil
+					m.state = stateWarning
+					m.warning = warning
+					m.newBackupDir = absPath
 				} else {
-					empty, err := fs.IsDirEmpty(absPath)
-					if err != nil {
-						m.inputValid = false
-						m.inputError = err
-					} else if empty {
-						exists, err := fs.DirExists(fs.GetParentPath(absPath))
-						if err != nil {
-							m.inputValid = false
-							m.inputError = err
-						} else if !exists {
-							m.inputValid = true
-							m.inputError = nil
-							m.state = stateWarning
-							m.warning = warningParentNotExists
-						} else {
-							m.inputValid = true
-							m.inputError = nil
-							// TODO is it possible that this command gets run async and that in the meantime the user can press enter again and cause the same thing again?
-							// wouldn't really be a big problem but still
-							// to avoid this we could use a separate finished state that we switch into here that just does nothing with a msg
-							// of course how likely is that on a modern machine to happen? can you even press that quickly?
-							cmd = returnBackupDir(absPath)
-						}
-					} else {
-						// TODO factor this out into a common method
-						// probably want to refactor this whole code anyway all these if elses are kinda ugly, what is a better way to do it?
-						m.state = stateWarning
-						m.warning = warningDirNotEmpty
-					}
+					m.newBackupDir = absPath
+					// TODO is it possible that this command gets run async and that in the meantime the user can press enter again and cause the same thing again?
+					// wouldn't really be a big problem but still
+					// to avoid this we could use a separate finished state that we switch into here that just does nothing with a msg
+					// of course how likely is that on a modern machine to happen? can you even press that quickly?
+					cmd = returnBackupDir(m.newBackupDir)
 				}
 			case key.Matches(msg, m.keyMap.cancel):
 				cmd = returnBackupDir("")
@@ -128,9 +104,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyMsg:
 			switch {
 			case key.Matches(msg, m.keyMap.warningConfirm):
-				// TODO don't recompute abs path again, need to store it above
-				absPath, _ := fs.GetAbsPath(m.textInput.Value())
-				cmd = returnBackupDir(absPath)
+				cmd = returnBackupDir(m.newBackupDir)
 			case key.Matches(msg, m.keyMap.warningCancel):
 				m.state = stateInput
 			}
@@ -139,42 +113,82 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+const (
+	warningDirNotEmpty = iota + 1
+	warningParentNotExists
+)
+
+func validatePath(path string) (string, error, int) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", errors.New("path cannot be empty"), 0
+	}
+
+	absPath, err := fs.AbsPath(path)
+	if err != nil {
+		return "", err, 0
+	}
+
+	exists, err := fs.DirExists(fs.ParentPath(absPath))
+	if err != nil {
+		return "", err, 0
+	}
+	if !exists {
+		return absPath, nil, warningParentNotExists
+	}
+
+	empty, err := fs.IsDirEmpty(absPath)
+	if err != nil {
+		return "", err, 0
+	}
+	if !empty {
+		return absPath, nil, warningDirNotEmpty
+	}
+
+	return absPath, nil, 0
+}
+
+func (m *Model) SetSize(width, height int) {
+	m.helpView.Width = width
+}
+
 func (m *Model) View() string {
-	// TODO a common type of rendering is with a title content and help at the bottom
-	// maybe make a function for that, so we don't have to repeat the same pattern over and over?
 	styles := m.styles
-	content := ""
+	var content string
 
 	switch m.state {
 	case stateInput:
-		content = fmt.Sprintf(
-			"%s\n\n%s\n%s\n",
+		parts := []string{
 			styles.TitleStyle.Render("Change Backup Directory"),
-			styles.NormalTextStyle.Render(fmt.Sprintf("Current: %s", m.backupDir)),
+			"",
+			styles.NormalTextStyle.Render(fmt.Sprintf("Current: %s", m.oldBackupDir)),
+			"",
 			m.textInput.View(),
+			"",
+		}
+		if m.inputError != nil {
+			parts = append(parts, styles.ErrorTextStyle.Render(m.inputError.Error()), "")
+		}
+		parts = append(parts, m.helpView.ShortHelpView(m.keyMap.inputKeys()))
+		content = lipgloss.JoinVertical(
+			lipgloss.Left,
+			parts...,
 		)
-		if !m.inputValid {
-			content = fmt.Sprintf("%s\n%s\n", content, styles.ErrorTextStyle.Render(m.inputError.Error()))
-		}
-		content = fmt.Sprintf("%s\n%s\n", content, m.helpView.ShortHelpView(m.keyMap.inputKeys()))
 	case stateWarning:
-		// TODO better text here pls
-		// TODO probably we should show the currently selected abs path also here -> create a field on model
 		var warningText string
-		// TODO we might also get into problems here with no text wrapping?
 		if m.warning == warningDirNotEmpty {
-			warningText = "Selected directory is not empty, if you continue files may be overwritten."
+			warningText = "Directory is not empty, if you continue files may be overwritten."
 		} else if m.warning == warningParentNotExists {
-			// TODO maybe don't have the might be a typo part? because sometimes you might want to backup in a subfolder of a new folder
-			// or keep it but formulate it differently, you sure you didn't mistype?
-			warningText = "Parent directory does not exist, might be a typo."
-		} else {
-			// TODO this shouldn't happen, just do the above in the else clause here?
+			warningText = "Parent directory does not exist, intended or typo?"
 		}
-		content = fmt.Sprintf(
-			"%s\n\n%s\n\n%s\n",
-			styles.TitleStyle.Render("Warning!"),
+		content = lipgloss.JoinVertical(
+			lipgloss.Left,
+			styles.TitleStyle.Render("Warning"),
+			"",
+			styles.NormalTextStyle.Render(fmt.Sprintf("Selected: %s", m.newBackupDir)),
+			"",
 			styles.ErrorTextStyle.Render(fmt.Sprintf("%s\nDo you want to continue?", warningText)),
+			"",
 			m.helpView.ShortHelpView(m.keyMap.warningKeys()),
 		)
 	}

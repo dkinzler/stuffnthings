@@ -6,16 +6,18 @@ import (
 )
 
 type Styles struct {
-	ViewStyle             lipgloss.Style
-	TitleStyle            lipgloss.Style
-	NormalTextStyle       lipgloss.Style
-	ErrorTextStyle        lipgloss.Style
-	SelectedListItemStyle lipgloss.Style
-	HelpStyles            help.Styles
+	ViewStyle                lipgloss.Style
+	TitleStyle               lipgloss.Style
+	NormalTextStyle          lipgloss.Style
+	ErrorTextStyle           lipgloss.Style
+	ListItemTitleStyle       lipgloss.Style
+	ListItemDescriptionStyle lipgloss.Style
+	ListItemSelectedStyle    lipgloss.Style
+	HelpStyles               help.Styles
 }
 
 func DefaultStyles() Styles {
-	// copied these styles from the charmbracelet/bubbles/help package
+	// copied from the charmbracelet/bubbles/help package
 	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{
 		Light: "#909090",
 		Dark:  "#828282",
@@ -41,11 +43,13 @@ func DefaultStyles() Styles {
 	}
 
 	return Styles{
-		ViewStyle:             lipgloss.NewStyle().Margin(1),
-		TitleStyle:            lipgloss.NewStyle().Bold(true).Padding(0, 3).Background(lipgloss.Color("#fc03ec")).Foreground(lipgloss.Color("#ffffff")),
-		NormalTextStyle:       lipgloss.NewStyle(),
-		ErrorTextStyle:        lipgloss.NewStyle().Foreground(lipgloss.Color("#ff0000")),
-		SelectedListItemStyle: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#fc03ec")),
-		HelpStyles:            helpStyles,
+		ViewStyle:                lipgloss.NewStyle().Margin(1),
+		TitleStyle:               lipgloss.NewStyle().Bold(true).Padding(0, 3).Background(lipgloss.Color("#fc03ec")).Foreground(lipgloss.Color("#ffffff")),
+		NormalTextStyle:          lipgloss.NewStyle(),
+		ErrorTextStyle:           lipgloss.NewStyle().Foreground(lipgloss.Color("#ff0000")),
+		ListItemTitleStyle:       lipgloss.NewStyle(),
+		ListItemDescriptionStyle: lipgloss.NewStyle().Faint(true),
+		ListItemSelectedStyle:    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#fc03ec")),
+		HelpStyles:               helpStyles,
 	}
 }

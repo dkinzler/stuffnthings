@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // Notes on design
@@ -35,7 +36,6 @@ const (
 	stateDirSelect
 	stateZip
 	stateGithub
-	stateExTest
 )
 
 type model struct {
@@ -54,9 +54,12 @@ type model struct {
 	dirSelectModel *dirselect.Model
 	zipModel       *zip.Model
 	githubModel    *github.Model
-	exModel        *exModel
 
 	styles style.Styles
+
+	// we need to keep track of the current window size so that we can pass it to nested models when they are created
+	width  int
+	height int
 }
 
 func NewModel(configFile string) *model {
@@ -96,19 +99,17 @@ func NewModel(configFile string) *model {
 		helpView:             helpView,
 		keyMap:               keyMap,
 
-		// Note: instead of keeping track of each possible child/nested model, we could have used a single generic "innerModel" field of type tea.Model,
-		// but it can sometimes be useful to know the concrete types e.g. to call a method not part of the tea.Model interface
+		// instead of keeping track of each child/nested model we could have used a single generic "innerModel" field of type tea.Model
+		// but sometimes it can be useful to have the concrete types e.g. to call a method not part of the tea.Model interface
 		dirSelectModel: nil,
 		zipModel:       nil,
 		githubModel:    nil,
-		exModel:        nil,
 
 		styles: styles,
 	}
 }
 
 func (m *model) Init() tea.Cmd {
-	// TODO do we need to call Init on list and helpview?
 	return nil
 }
 
@@ -160,15 +161,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, m.keyMap.Select):
 				s := int(m.mainMenu.SelectedItem().(mainMenuItem))
 				switch s {
-				// TODO call setSize for inner models that need it
 				case mainMenuItemDirSelect:
 					m.state = stateDirSelect
 					m.dirSelectModel = dirselect.NewModel(m.config.BackupDir, m.styles)
 					cmd = m.dirSelectModel.Init()
-				case mainMenuItemExTest:
-					m.state = stateExTest
-					m.exModel = newExModel(m.styles)
-					cmd = m.exModel.Init()
 				case mainMenuItemZip:
 					m.state = stateZip
 					m.zipModel = zip.NewModel(m.config.BackupDir, m.styles)
@@ -176,11 +172,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case mainMenuItemGithub:
 					m.state = stateGithub
 					m.githubModel = github.NewModel(m.config.BackupDir, m.config.Github.Token, m.styles)
-					// TODO we need to store viewWidth and height here?
-					// m.githubModel.SetSize(m.viewWidth, m.viewHeight)
-					// this is a hack
-					cmd = tea.Batch(m.githubModel.Init(), tea.WindowSize())
+					cmd = m.githubModel.Init()
 				}
+				// will call SetSize on the nested model we just created
+				m.SetSize(m.width, m.height)
 				return m, cmd
 			}
 		}
@@ -191,18 +186,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case dirselect.Done:
 			if msg.BackupDir != "" {
 				m.config.BackupDir = msg.BackupDir
-				// TODO this would be less annoying with a shared pointer to a struct, but oh well
 				m.mainMenuItemDelegate.backupDir = m.config.BackupDir
 			}
 			m.dirSelectModel = nil
 			m.state = stateMainMenu
 		default:
 			_, cmd = m.dirSelectModel.Update(msg)
-		}
-	case stateExTest:
-		switch msg := msg.(type) {
-		default:
-			_, cmd = m.exModel.Update(msg)
 		}
 	case stateZip:
 		switch msg := msg.(type) {
@@ -225,23 +214,41 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) SetSize(width, height int) {
-	// title takes 2 lines, help takes 3 lines, including empty lines and global margin/padding takes some space
+	m.width = width
+	m.height = height
+
+	// margin, border, padding
 	w, h := m.styles.ViewStyle.GetFrameSize()
-	// TODO name this innerHeight and innerWidth?
-	innerHeight := height - h - 5
-	if innerHeight > 9 {
-		innerHeight = 9
-	}
-	if innerHeight < 0 {
-		innerHeight = 2
-	}
+
+	// available to nested models
 	innerWidth := width - w
-	m.mainMenu.SetSize(innerWidth, innerHeight)
-	m.helpView.Width = innerWidth
-	if m.githubModel != nil {
-		m.githubModel.SetSize(width-w, height-h)
+	innerHeight := height - h
+
+	// title takes 2 lines, help takes 3, rest is available for main menu list
+	mainMenuHeight := innerHeight - 5
+	// if there is a lot of vertical space we don't want the list to fill it all
+	// otherwise most of it will be empty and key help will be all the way at the bottom
+	// TODO can we achieve this otherwise, that list will not use all the space? -> we could truncate the output
+	// from Render()? that way we would mostly get the right results? think about itagain
+	if mainMenuHeight > len(mainMenuItems)*3 {
+		mainMenuHeight = len(mainMenuItems) * 3
 	}
-	// TODO call for other models that have SetSize
+	if mainMenuHeight < 0 {
+		mainMenuHeight = 2
+	}
+	m.mainMenu.SetSize(innerWidth, mainMenuHeight)
+
+	m.helpView.Width = innerWidth
+
+	if m.dirSelectModel != nil {
+		m.dirSelectModel.SetSize(innerWidth, innerHeight)
+	}
+	if m.zipModel != nil {
+		m.zipModel.SetSize(innerWidth, innerHeight)
+	}
+	if m.githubModel != nil {
+		m.githubModel.SetSize(innerWidth, innerHeight)
+	}
 }
 
 func (m *model) View() string {
@@ -249,11 +256,12 @@ func (m *model) View() string {
 	styles := m.styles
 
 	if m.confirmQuit {
-		content = fmt.Sprintf(
-			"%s\n\n%s\n\n%s\n",
-			// TODO better title text?
-			styles.TitleStyle.Render("Confirm Quit"),
+		content = lipgloss.JoinVertical(
+			lipgloss.Left,
+			styles.TitleStyle.Render("Quit"),
+			"",
 			styles.NormalTextStyle.Render("Do you really want to quit?"),
+			"",
 			m.helpView.ShortHelpView(m.keyMap.confirmQuitKeys()),
 		)
 		return styles.ViewStyle.Render(content)
@@ -261,28 +269,28 @@ func (m *model) View() string {
 
 	switch m.state {
 	case stateMainMenu:
-		content = fmt.Sprintf(
-			"%s\n\n%s\n\n%s\n",
+		content = lipgloss.JoinVertical(
+			lipgloss.Left,
 			styles.TitleStyle.Render("Backup"),
+			"",
 			m.mainMenu.View(),
 			m.helpView.FullHelpView(m.keyMap.mainMenuKeys()),
 		)
 	case stateConfigError:
 		var errText string
 		if m.configError != nil {
-			// TODO any fance error messages processing here
 			errText = m.configError.Error()
 		}
-		content = fmt.Sprintf(
-			"%s\n\n%s\n\n%s\n",
+		content = lipgloss.JoinVertical(
+			lipgloss.Left,
 			styles.TitleStyle.Render("Config Error"),
+			"",
 			styles.ErrorTextStyle.Render(errText),
+			"",
 			m.helpView.ShortHelpView(m.keyMap.configErrorKeys()),
 		)
 	case stateDirSelect:
 		content = m.dirSelectModel.View()
-	case stateExTest:
-		content = m.exModel.View()
 	case stateZip:
 		content = m.zipModel.View()
 	case stateGithub:
@@ -291,7 +299,6 @@ func (m *model) View() string {
 	return styles.ViewStyle.Render(content)
 }
 
-// TODO unexport these
 type keyMap struct {
 	CursorUp            key.Binding
 	CursorDown          key.Binding
@@ -371,21 +378,12 @@ const (
 	mainMenuItemDirSelect int = iota
 	mainMenuItemZip
 	mainMenuItemGithub
-	mainMenuItemExTest
 )
 
-// We won't actually need any of the methods since we use a custom delegate to draw the list items and don't enable filtering.
 type mainMenuItem int
 
+// satisfy list.Item interface, we won't actually need this since filtering is disabled
 func (i mainMenuItem) FilterValue() string {
-	return ""
-}
-
-func (i mainMenuItem) Title() string {
-	return ""
-}
-
-func (i mainMenuItem) Description() string {
 	return ""
 }
 
@@ -393,8 +391,6 @@ var mainMenuItems = []list.Item{
 	mainMenuItem(mainMenuItemDirSelect),
 	mainMenuItem(mainMenuItemZip),
 	mainMenuItem(mainMenuItemGithub),
-	// TODO delete this
-	mainMenuItem(mainMenuItemExTest),
 }
 
 type mainMenuItemDelegate struct {
@@ -417,10 +413,7 @@ func (d mainMenuItemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd {
 func (d mainMenuItemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
 	item := int(listItem.(mainMenuItem))
 
-	// TODO make these more consistent, i.e. add all these classes already to Styles struct
-	itemTitleStyle := d.styles.NormalTextStyle
-	itemDescriptionStyle := d.styles.NormalTextStyle.Faint(true)
-	selectedItemStyle := d.styles.SelectedListItemStyle
+	styles := d.styles
 
 	var title string
 	var description string
@@ -435,16 +428,13 @@ func (d mainMenuItemDelegate) Render(w io.Writer, m list.Model, index int, listI
 	case mainMenuItemGithub:
 		title = "GitHub"
 		description = "Backup your repos"
-	case mainMenuItemExTest:
-		title = "ExTest"
-		description = "Great Test"
 	default:
 		return
 	}
 
-	s := fmt.Sprintf("%s\n%s", itemTitleStyle.Render(title), itemDescriptionStyle.Render(description))
+	s := fmt.Sprintf("%s\n%s", styles.ListItemTitleStyle.Render(title), styles.ListItemDescriptionStyle.Render(description))
 	if index == m.Index() {
-		s = selectedItemStyle.Render(s)
+		s = styles.ListItemSelectedStyle.Render(s)
 	}
 
 	fmt.Fprintf(w, s)
@@ -479,7 +469,7 @@ func loadConfig(configFile string) (config, error) {
 		}
 		config.BackupDir = backupDir
 	} else {
-		absPath, err := fs.GetAbsPath(config.BackupDir)
+		absPath, err := fs.AbsPath(config.BackupDir)
 		if err != nil {
 			return config, fmt.Errorf("invalid directory: %w", err)
 		}

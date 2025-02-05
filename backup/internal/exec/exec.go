@@ -10,22 +10,55 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// TODO maybe still use it?
-// Note: we could have also used the functional options pattern, but this works well enough for now.
-type Options struct {
-	ReturnStdout bool
-	ReturnStderr bool
+type options struct {
+	returnStdout bool
+	returnStderr bool
 	// only for execBackground
-	Stdin   string
-	Timeout time.Duration
+	stdin   string
+	timeout time.Duration
 }
 
-func DefaultOptions() Options {
-	return Options{
-		ReturnStdout: true,
-		ReturnStderr: true,
-		Stdin:        "",
-		Timeout:      time.Second * 10,
+type Option func(*options)
+
+// default is to return stdout
+func WithStdout(returnStdout bool) Option {
+	return func(o *options) {
+		o.returnStdout = returnStdout
+	}
+}
+
+// default is to return stderr
+func WithStderr(returnStderr bool) Option {
+	return func(o *options) {
+		o.returnStderr = returnStderr
+	}
+}
+
+func WithStdin(stdin string) Option {
+	return func(o *options) {
+		o.stdin = stdin
+	}
+}
+
+// default 10s
+func WithTimeout(timeout time.Duration) Option {
+	return func(o *options) {
+		o.timeout = timeout
+	}
+}
+
+func defaultOptions() *options {
+	return &options{
+		returnStdout: true,
+		returnStderr: true,
+		stdin:        "",
+		timeout:      time.Second * 10,
+	}
+}
+
+func (o *options) apply(opts ...Option) {
+	for _, opt := range opts {
+		opt(o)
 	}
 }
 
@@ -36,16 +69,20 @@ type Result struct {
 	Err      error
 	Stdout   string
 	Stderr   string
+	// time it took the command to run
+	Time time.Duration
 }
 
 type Callback func(Result) tea.Msg
 
-// TODO polish comment
-// Runs the given command in the foreground by effectively pausing this program and handing over the terminal screen.
-// Extends the tea.Exec function to return a more detailed result including e.g. the exit code and output on stdin and stderr.
-// Useful for interactive commands where you also want the standard and error output e.g. to provide better error messages.
-// Note that not some programs write error messages to stdout.
-func Foreground(cmd []string, fn Callback, options Options) tea.Cmd {
+// Runs a command in the foreground by effectively pausing the program and handing over the terminal window.
+// Wraps the tea.Exec function to return a more detailed result including the exit code, outputs on stdin and stderr and more.
+// Useful for interactive commands where you also want the standard and error output to e.g. show a detailed error screen.
+// Note that some programs write error messages to stdout.
+func Foreground(cmd []string, fn Callback, opts ...Option) tea.Cmd {
+	options := defaultOptions()
+	options.apply(opts...)
+
 	var name string
 	var args []string
 	if len(cmd) > 0 {
@@ -54,20 +91,23 @@ func Foreground(cmd []string, fn Callback, options Options) tea.Cmd {
 	}
 
 	var outBuffer *strings.Builder
-	if options.ReturnStdout {
+	if options.returnStdout {
 		outBuffer = &strings.Builder{}
 	}
 	var errBuffer *strings.Builder
-	if options.ReturnStderr {
+	if options.returnStderr {
 		errBuffer = &strings.Builder{}
 	}
 	c := newCommand(exec.Command(name, args...), outBuffer, errBuffer)
+	startTime := time.Now()
 	return tea.Exec(c, func(err error) tea.Msg {
 		if fn == nil {
 			return nil
 		}
+
 		var result Result
 		result.Cmd = cmd
+		result.Time = time.Now().Sub(startTime)
 		if err != nil {
 			result.ExitCode = -1
 			e, ok := err.(*exec.ExitError)
@@ -81,19 +121,22 @@ func Foreground(cmd []string, fn Callback, options Options) tea.Cmd {
 				result.Err = err
 			}
 		}
-		if options.ReturnStdout {
+		if options.returnStdout {
 			result.Stdout = outBuffer.String()
 		}
-		if options.ReturnStderr {
+		if options.returnStderr {
 			result.Stderr = errBuffer.String()
 		}
 		return fn(result)
 	})
 }
 
-func Background(cmd []string, fn Callback, options Options) tea.Cmd {
+func Background(cmd []string, fn Callback, opts ...Option) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), options.Timeout)
+		options := defaultOptions()
+		options.apply(opts...)
+
+		ctx, cancel := context.WithTimeout(context.Background(), options.timeout)
 		defer cancel()
 
 		var name string
@@ -104,16 +147,16 @@ func Background(cmd []string, fn Callback, options Options) tea.Cmd {
 		}
 
 		c := exec.CommandContext(ctx, name, args...)
-		if options.Stdin != "" {
-			c.Stdin = strings.NewReader(options.Stdin)
+		if options.stdin != "" {
+			c.Stdin = strings.NewReader(options.stdin)
 		}
 		var outBuffer *strings.Builder
-		if options.ReturnStdout {
+		if options.returnStdout {
 			outBuffer = &strings.Builder{}
 		}
 		c.Stdout = outBuffer
 		var errBuffer *strings.Builder
-		if options.ReturnStderr {
+		if options.returnStderr {
 			errBuffer = &strings.Builder{}
 		}
 		c.Stderr = errBuffer
@@ -121,6 +164,7 @@ func Background(cmd []string, fn Callback, options Options) tea.Cmd {
 			return nil
 		}
 
+		startTime := time.Now()
 		err := c.Run()
 
 		if fn == nil {
@@ -128,6 +172,7 @@ func Background(cmd []string, fn Callback, options Options) tea.Cmd {
 		}
 		var result Result
 		result.Cmd = cmd
+		result.Time = time.Now().Sub(startTime)
 		if err != nil {
 			result.ExitCode = -1
 			e, ok := err.(*exec.ExitError)
@@ -141,10 +186,10 @@ func Background(cmd []string, fn Callback, options Options) tea.Cmd {
 				result.Err = err
 			}
 		}
-		if options.ReturnStdout {
+		if options.returnStdout {
 			result.Stdout = outBuffer.String()
 		}
-		if options.ReturnStderr {
+		if options.returnStderr {
 			result.Stderr = errBuffer.String()
 		}
 		return fn(result)

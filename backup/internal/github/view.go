@@ -83,6 +83,7 @@ func (m *Model) viewReposLoaded() string {
 var checkmark = lipgloss.NewStyle().Foreground(lipgloss.Color("#7ef542")).Render("✓")
 var cross = lipgloss.NewStyle().Foreground(lipgloss.Color("#de0d18")).Render("x")
 
+// TODO we could instead use lipgloss.List here? not sure if that would be much different though
 func (m *Model) viewCloningRepos() string {
 	var s string
 	for _, repo := range m.reposToClone {

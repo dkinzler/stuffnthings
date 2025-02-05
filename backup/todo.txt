@@ -23,6 +23,12 @@ Next steps
 * in general we need to standardize things across the models so it feels the same
     * e.g. keys for continue, quit etc.
     * text the same etc.
+    * add a bit of meme text, why not
+* sizing stuff
+    * set width of help view everywhere
+    * pass through set size everywhere, need to call on lists as well
+    * we probably want to use style.Width to wrap text? how? maybe directly in view methods, but need only apply to content that might be too long e.g. not titles?
+        * we don't need to support terminals that are 2x4 in size, don't worry about stuff like that
 * error pages
     * instead of showing detailed errors can also just give the bare minimum and refer to logs, that is probably easier because usually things shouldn't go wrong
         * especially when commands go wrong -> think about it again

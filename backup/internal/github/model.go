@@ -1,15 +1,9 @@
 package github
 
 import (
-	"backup/internal/exec"
 	"backup/internal/fs"
 	"backup/internal/style"
-	"encoding/json"
-	"errors"
-	"fmt"
 	"log"
-	"net/http"
-	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -28,18 +22,6 @@ const (
 	stateReposCloned
 )
 
-// TODO any other fields we should add, maybe if it is private or not?
-type Repo struct {
-	// TODO is this the right id field or should we use something else? is it unique?
-	Id       int    `json:"id"`
-	Name     string `json:"name"`
-	FullName string `json:"full_name"`
-	Owner    struct {
-		Login string `json:"login"`
-	} `json:"owner"`
-	CloneUrl string `json:"clone_url"`
-}
-
 // TODO do we need a confirm dialog? maybe not, can just load stuff again, no biggy?
 // although it might be annoying on repo select screen if you did a bunch of selections and then misclick
 // -> probably keep
@@ -51,13 +33,13 @@ type Model struct {
 
 	token string
 
-	repos             []Repo
+	repos             []repo
 	loadingReposError error
 
 	reposList       *RepoList
 	validationError string
 
-	reposToClone []Repo
+	reposToClone []repo
 
 	cloneResult  map[int]bool
 	clonesFailed int
@@ -106,7 +88,7 @@ func NewModel(backupDir string, token string, styles style.Styles) *Model {
 		helpView: helpView,
 		spinner: spinner.New(
 			spinner.WithSpinner(spinner.Dot),
-			spinner.WithStyle(styles.SelectedListItemStyle),
+			spinner.WithStyle(styles.ListItemSelectedStyle),
 		),
 	}
 }
@@ -276,177 +258,12 @@ func (m *Model) setListSize() {
 	}
 }
 
-// TODO add log messages to this
-// instead of showing detailed errors can also just give the bare minimum and refer to logs, that is probably easier because usually things shouldn't go wrong
-
-type loadReposResult struct {
-	repos []Repo
-	err   error
-}
-
-func loadRepos(token string) tea.Cmd {
-	return func() tea.Msg {
-		var result loadReposResult
-
-		var repos []Repo
-
-		// TODO is this the right way or shoudl we use REquestWithContext?
-		client := &http.Client{Timeout: time.Second * 10}
-
-		req, err := http.NewRequest("GET", "https://api.github.com/user/repos", nil)
-		if err != nil {
-			result.err = err
-			return result
-		}
-		req.Header.Add("Accept", "application/vnd.github+json")
-		req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
-		// could be omitted to always use most recent version
-		req.Header.Add("X-GitHub-Api-Version", "2022-11-28")
-		q := req.URL.Query()
-		// TODO only get your own repos, keep it like that?
-		q.Add("affiliation", "owner")
-		q.Add("per_page", "100")
-		req.URL.RawQuery = q.Encode()
-
-		// TODO do pagination
-		// see https://docs.github.com/en/rest/using-the-rest-api/using-pagination-in-the-rest-api?apiVersion=2022-11-28
-		// basically check if the next header ist there
-
-		resp, err := client.Do(req)
-		defer resp.Body.Close()
-		if err != nil {
-			result.err = err
-			return result
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			result.err = err
-			return result
-		}
-
-		decoder := json.NewDecoder(resp.Body)
-		err = decoder.Decode(&repos)
-		if err != nil {
-			result.err = err
-			return result
-		}
-
-		result.repos = repos
-		result.err = nil
-		return result
-	}
-}
-
-type cloneRepoResult struct {
-	id  int
-	err error
-}
-
-func cloneRepo(repo Repo, dir string, token string) tea.Cmd {
-	// ctx, cancel := context.WithTimeout(context.Background(), time.Second*60)
-	// defer cancel()
-	// // run the command through sh, otherwise e.g. ~ in the path won't get expanded
-	// cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("gh repo clone %s %s", repo.Url, filepath.Join(dir, repo.Name)))
-	//
-	// out, err := cmd.CombinedOutput()
-	// if err != nil {
-	// 	e := fmt.Errorf("%s: %s", err, out)
-	// 	log.Println(e)
-	// 	return loadReposResult{repos: nil, err: e}
-	// }
-	// return cloneRepoResult{id: repo.Id, err: nil}
-
-	// that works
-	// but maybe do it with username and token in url, that seems more robust, and run like this commands won't get logged?
-	// TODO do we have to be careful with repo names? can they contain weird chars so that we shouldn't use them as dir name?
-	cmd := []string{"git", "clone", repo.CloneUrl, fs.JoinPath(dir, repo.Name)}
-	// cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("gh repo clone %s %s", repo.Url, filepath.Join(dir, repo.Name)))
-	options := exec.DefaultOptions()
-	options.Stdin = fmt.Sprintf("%s\n%s\n", repo.Owner.Login, token)
-
-	return exec.Background(cmd, func(r exec.Result) tea.Msg {
-		if r.ExitCode == 0 {
-			return cloneRepoResult{id: repo.Id, err: nil}
-		} else {
-			if r.Err != nil {
-				return cloneRepoResult{id: repo.Id, err: r.Err}
-			} else {
-				// TODO this is not good, what about stderr and stdout, does git write to stderr?
-				return cloneRepoResult{id: repo.Id, err: errors.New("something went wrong")}
-			}
-		}
-	}, options)
-}
-
 type Done struct{}
 
 // TODO we could name that function done() as well in other models if we don't have that already -> check it out
+// yesyes
 func done() tea.Cmd {
 	return func() tea.Msg {
 		return Done{}
 	}
 }
-
-// func cloneRepo(repo Repo, token string) {
-// 	// that works
-// 	// but maybe do it with username and token in url, that seems more robust, and run like this commands won't get logged?
-// 	cmd := []string{"git", "clone", repo.CloneUrl, "clonetest"}
-// 	// cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("gh repo clone %s %s", repo.Url, filepath.Join(dir, repo.Name)))
-// 	options := exec
-// 	options.stdin = fmt.Sprintf("%s\n%s\n", repo.Owner.Login, token)
-// 	ctx, cancel := context.WithTimeout(context.Background(), options.timeout)
-// 	defer cancel()
-//
-// 	var name string
-// 	var args []string
-// 	if len(cmd) > 0 {
-// 		name = cmd[0]
-// 		args = cmd[1:]
-// 	}
-//
-// 	c := exec.CommandContext(ctx, name, args...)
-// 	if options.stdin != "" {
-// 		c.Stdin = strings.NewReader(options.stdin)
-// 	}
-// 	var outBuffer *strings.Builder
-// 	if options.returnStdout {
-// 		outBuffer = &strings.Builder{}
-// 	}
-// 	c.Stdout = outBuffer
-// 	var errBuffer *strings.Builder
-// 	if options.returnStderr {
-// 		errBuffer = &strings.Builder{}
-// 	}
-// 	c.Stderr = errBuffer
-//
-// 	err := c.Run()
-//
-// 	var result exec.Result
-// 	result.Cmd = cmd
-// 	if err != nil {
-// 		result.ExitCode = -1
-// 		e, ok := err.(*exec.ExitError)
-// 		if ok {
-// 			if e.Exited() {
-// 				result.ExitCode = e.ExitCode()
-// 			} else {
-// 				result.Err = err
-// 			}
-// 		} else {
-// 			result.Err = err
-// 		}
-// 	}
-// 	if options.returnStdout {
-// 		result.Stdout = outBuffer.String()
-// 	}
-// 	if options.returnStderr {
-// 		result.Stderr = errBuffer.String()
-// 	}
-//
-// 	if result.ExitCode != 0 {
-// 		panic(fmt.Sprintf("%s\n\n%s\n\n%s\n\n%s\n\n", result.ExitCode, result.Err.Error(), result.Stderr, result.Stdout))
-// 	}
-//
-// 	// run the command through sh, otherwise e.g. ~ in the path won't get expanded
-// 	// cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("gh repo clone %s %s", repo.Url, filepath.Join(dir, repo.Name)))
-// }

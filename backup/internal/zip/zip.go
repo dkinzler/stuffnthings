@@ -6,20 +6,21 @@ import (
 	"backup/internal/style"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type state int
 
 const (
 	stateInput state = iota
-	// TODO could have had a separate stateZipping but not really necessary?
-	// maybe for completeness so that we can't spam keys and cause another zip to happen?
-	// although that is unlikely, but why not do it
+	// otherwise it might be possible to e.g. start multiple zip commands by spamming the enter key
+	stateZipping
 	stateSuccess
 	stateError
 )
@@ -28,7 +29,7 @@ type Model struct {
 	state      state
 	backupDir  string
 	inputError error
-	result     exec.Result
+	result     zipResult
 
 	keyMap keyMap
 
@@ -59,8 +60,7 @@ func NewModel(backupDir string, styles style.Styles) *Model {
 }
 
 func (m *Model) Init() tea.Cmd {
-	// TODO do we need to init help or textinput?
-	return nil
+	return textinput.Blink
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -74,14 +74,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, m.keyMap.inputConfirm):
 				file := m.textInput.Value()
 				if file == "" {
-					// TODO better text
-					m.inputError = errors.New("cannot be empty")
+					m.inputError = errors.New("please type something, anything, I beg you")
 				} else {
-					absFile, err := fs.GetAbsPath(file)
+					absFile, err := fs.AbsPath(file)
 					if err != nil {
 						m.inputError = err
 					} else {
 						m.inputError = nil
+						m.result = zipResult{}
+						m.state = stateZipping
 						cmd = zipBackupDir(m.backupDir, absFile)
 					}
 				}
@@ -90,16 +91,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				m.textInput, cmd = m.textInput.Update(msg)
 			}
+		default:
+			m.textInput, cmd = m.textInput.Update(msg)
+		}
+	case stateZipping:
+		switch msg := msg.(type) {
 		case zipResult:
-			r := msg.result
-			if r.ExitCode == 0 {
+			if msg.result.ExitCode == 0 {
 				m.state = stateSuccess
 			} else {
 				m.state = stateError
-				m.result = r
 			}
-		default:
-			m.textInput, cmd = m.textInput.Update(msg)
+			m.result = msg
 		}
 	case stateSuccess:
 		if msg, ok := msg.(tea.KeyMsg); ok && key.Matches(msg, m.keyMap.successContinue) {
@@ -114,41 +117,56 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *Model) SetSize(width, height int) {
+	m.help.Width = width
+}
+
 func (m *Model) View() string {
 	styles := m.styles
-	content := ""
+	var content string
 
 	switch m.state {
 	case stateInput:
-		content = fmt.Sprintf(
-			"%s\n\n%s\n%s\n",
+		parts := []string{
 			styles.TitleStyle.Render("Zip Backup Directory"),
+			"",
 			styles.NormalTextStyle.Render("Enter filename"),
+			"",
 			m.textInput.View(),
-		)
-		if m.inputError != nil {
-			content = fmt.Sprintf("%s\n%s\n", content, styles.ErrorTextStyle.Render(m.inputError.Error()))
+			"",
 		}
-		content = fmt.Sprintf("%s\n%s\n", content, m.help.ShortHelpView(m.keyMap.inputKeys()))
+		if m.inputError != nil {
+			parts = append(parts, styles.ErrorTextStyle.Render(m.inputError.Error()), "")
+		}
+		parts = append(parts, m.help.ShortHelpView(m.keyMap.inputKeys()))
+		content = lipgloss.JoinVertical(
+			lipgloss.Left,
+			parts...,
+		)
+	case stateZipping:
+		content = ""
 	case stateSuccess:
-		content = fmt.Sprintf(
-			"%s\n\n%s\n\n%s\n",
-			// TODO as content could maybe include here the stats, maybe how long it took, how big the resulting file is?
-			styles.TitleStyle.Render("Zip successful!"),
+		duration := m.result.result.Time.Round(time.Second)
+		content = lipgloss.JoinVertical(
+			lipgloss.Left,
+			styles.TitleStyle.Render("Success"),
+			"",
+			styles.NormalTextStyle.Render(fmt.Sprintf("Zipped %s in %s", m.result.file, duration)),
+			styles.NormalTextStyle.Render(fmt.Sprintf("File size %s", fileSizeString(m.result.size))),
 			"",
 			m.help.ShortHelpView(m.keyMap.successKeys()),
 		)
 	case stateError:
-		// TODO prettier error message, should be show complete stdout?
+		// TODO do error page
 		var errText string
-		if m.result.Err != nil {
-			errText = m.result.Err.Error()
+		if m.result.result.Err != nil {
+			errText = m.result.result.Err.Error()
 		} else {
-			errText = m.result.Stdout
+			errText = m.result.result.Stdout
 		}
 		content = fmt.Sprintf(
 			"%s\n\n%s\n\n%s\n",
-			styles.TitleStyle.Render("Zip error!"),
+			styles.TitleStyle.Render("Error"),
 			styles.NormalTextStyle.Render(errText),
 			m.help.ShortHelpView(m.keyMap.errorKeys()),
 		)
@@ -157,44 +175,44 @@ func (m *Model) View() string {
 	return content
 }
 
-type zipResult struct {
-	result exec.Result
+func fileSizeString(size int64) string {
+	if size >= 1024*1024 {
+		return fmt.Sprintf("%vM", size/(1024*1024))
+	} else if size >= 1024 {
+		return fmt.Sprintf("%vK", size/1024)
+	} else {
+		return fmt.Sprintf("%v", size)
+	}
 }
 
-// TODO fix
+type zipResult struct {
+	result exec.Result
+	file   string
+	size   int64
+}
+
 func zipBackupDir(dir string, file string) tea.Cmd {
+	// should work even if dir is /
+	base := fs.BasePath(dir)
+	parent := fs.ParentPath(dir)
+	// why change directory? because otherwise the zip file will contain all the parent directories of files
+	// e.g. when you unzip you will get home/username/backup/somefile instead of just backup/somefile
 	// sh starts a new shell, so we do not have to worry about changing directory back
-	// why in new shell?
-	// we need the cd because otherwise zip file will contain the full path to every file
-	// i.e. when you unpack you will get something like home/username/abc/backup/somefile
-	// instead of just backup/somefile
-	// TODO yeah we probably have to do this
-	// cmd := exec.Command("sh", "-c", fmt.Sprintf("cd %s && zip -r %s .", dir, file))
-
-	// note that zip prints errors to stdout
-	// return bexec.Exec(cmd, func(err error, s string) tea.Msg {
-	// 	if err != nil {
-	// 		s = strings.TrimSpace(s)
-	// 		e := fmt.Errorf("%v: %v", err, s)
-	// 		log.Println(e)
-	// 		return zipResult{err: e}
-	// 	}
-	// 	return zipResult{err: nil}
-	// }, true)
-
-	// TODO does this always work?
-	// basically if the dir is not just a single segment like / then it should work
-	// what if it is / then?
-	// TODO probably just forbid using / as backup dir -> yes yes and show a cheeky error message that this is a bad idea and you better do this outside of this program, I'm not taking responsibility for this
-	// TODO what happens if we pass something like / to zip as the output file, would this work?
-	// or more generally if we pass an existing directory, or will it always add an .zip ending? try it out
-	// that should be fine, it will add .zip and if there already is a dir with the name .zip it will try to use it and fail
-	base := fs.GetBasePath(dir)
-	parent := fs.GetParentPath(dir)
 	cmd := []string{"sh", "-c", fmt.Sprintf("cd %s && zip -r %s %s", parent, file, base)}
 	return exec.Foreground(cmd, func(er exec.Result) tea.Msg {
-		return zipResult{result: er}
-	}, exec.DefaultOptions())
+		result := zipResult{
+			result: er,
+			file:   file,
+			size:   -1,
+		}
+		if er.ExitCode == 0 {
+			size, err := fs.FileSize(file)
+			if err == nil {
+				result.size = size
+			}
+		}
+		return result
+	})
 }
 
 type Done struct{}

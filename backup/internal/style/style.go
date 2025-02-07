@@ -43,10 +43,11 @@ func DefaultStyles() Styles {
 	}
 
 	return Styles{
-		ViewStyle:                lipgloss.NewStyle().Margin(1),
-		TitleStyle:               lipgloss.NewStyle().Bold(true).Padding(0, 3).Background(lipgloss.Color("#fc03ec")).Foreground(lipgloss.Color("#ffffff")),
-		NormalTextStyle:          lipgloss.NewStyle(),
-		ErrorTextStyle:           lipgloss.NewStyle().Foreground(lipgloss.Color("#ff0000")),
+		ViewStyle:  lipgloss.NewStyle().Margin(1),
+		TitleStyle: lipgloss.NewStyle().Bold(true).Padding(0, 3).Background(lipgloss.Color("#fc03ec")).Foreground(lipgloss.Color("#ffffff")),
+		// Note: we could also set the max width of text dynamically using the current window size, but this is good enough for now
+		NormalTextStyle:          lipgloss.NewStyle().Width(40),
+		ErrorTextStyle:           lipgloss.NewStyle().Foreground(lipgloss.Color("#ff0000")).Width(40),
 		ListItemTitleStyle:       lipgloss.NewStyle(),
 		ListItemDescriptionStyle: lipgloss.NewStyle().Faint(true),
 		ListItemSelectedStyle:    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#fc03ec")),

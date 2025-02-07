@@ -38,7 +38,6 @@ type Model struct {
 
 func NewModel(backupDir string, styles style.Styles) *Model {
 	bt := textinput.New()
-	bt.Placeholder = backupDir
 	bt.CharLimit = 250
 	bt.Width = 40
 	bt.Focus()
@@ -89,10 +88,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// wouldn't really be a big problem but still
 					// to avoid this we could use a separate finished state that we switch into here that just does nothing with a msg
 					// of course how likely is that on a modern machine to happen? can you even press that quickly?
-					cmd = returnBackupDir(m.newBackupDir)
+					cmd = done(m.newBackupDir)
 				}
 			case key.Matches(msg, m.keyMap.cancel):
-				cmd = returnBackupDir("")
+				cmd = done("")
 			default:
 				m.textInput, cmd = m.textInput.Update(msg)
 			}
@@ -104,7 +103,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyMsg:
 			switch {
 			case key.Matches(msg, m.keyMap.warningConfirm):
-				cmd = returnBackupDir(m.newBackupDir)
+				cmd = done(m.newBackupDir)
 			case key.Matches(msg, m.keyMap.warningCancel):
 				m.state = stateInput
 			}
@@ -200,7 +199,7 @@ type Done struct {
 	BackupDir string
 }
 
-func returnBackupDir(backupDir string) tea.Cmd {
+func done(backupDir string) tea.Cmd {
 	return func() tea.Msg {
 		return Done{BackupDir: backupDir}
 	}

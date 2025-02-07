@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"strings"
@@ -26,6 +27,11 @@ type repo struct {
 	} `json:"owner"`
 	CloneUrl string `json:"clone_url"`
 	Private  bool   `json:"private"`
+}
+
+// implement the Item interface from the bubbles/list package
+func (r repo) FilterValue() string {
+	return r.Name
 }
 
 type loadReposResult struct {
@@ -128,6 +134,16 @@ type cloneRepoResult struct {
 }
 
 func cloneRepo(repo repo, dir string, token string) tea.Cmd {
+	// TODO remove this
+	// return func() tea.Msg {
+	// 	time.Sleep(time.Second * time.Duration(rand.Int63n(10)+2))
+	// 	if repo.Id%2 == 0 {
+	// 		return cloneRepoResult{id: repo.Id, err: nil}
+	// 	} else {
+	// 		return cloneRepoResult{id: repo.Id, err: errors.New("something went wrong")}
+	// 	}
+	// }
+
 	// another approach would be to pass username/token in the url instead of via stdin e.g. https://username:token@example.com
 	// these commands should not get logged in your shell history
 	cmd := []string{"git", "clone", repo.CloneUrl, fs.JoinPath(dir, repo.Name)}

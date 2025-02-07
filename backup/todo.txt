@@ -2,66 +2,38 @@ Next steps
 * generally
     * design for the default case of how you will use it
     * add a bit of comment for decision decisions
-* After Github clean everything up before you add more stuff -> go file by file and fix stuff
-* github
-    * on repos cloned screen we use esc to return instead of maybe enter to continue? whatever?
-        * but we also don't handle confirmQuit right then, because the esc from reposCloned is caught by the outermodel to confirm exit
-        * or is that fine that we confirm the quit again? why not
-    * do we need to run something special to get complete "git history" when cloning? or do we always get everything?
-    * otherwise it seems fine
-* make styles a global var? would be easier don't have to pass stuff around
-* should we have a global config dir that includes backupdir as well?
-* full TUI is fine and looks great, but for usability something even simpler would have probably worked better?
-    * where we just have a config file and if there is e.g. a github token set then it will backup all github repos, automatically
-    * so that from the config file almost everything happens automatically maybe it shows a few options and stuff on the cli, but not in full screen?
-    * i mean could experiment with that later, whatever we have now is also fine, finish it
-    * can then later think about it again, maybe add a non-interactive mode that does exactly that or not, whatever
-* we should maybe put config in a seperate package, that way we can pass the structs like github to the inner models, or just the complete config?
-    * or maybe even better the inner components should define their own config struct and can then combine it into the global one in ui.go -> yes, that's the right way
-* red text for error messages?
-    * prolly not
-* in general we need to standardize things across the models so it feels the same
-    * e.g. keys for continue, quit etc.
-    * text the same etc.
-    * add a bit of meme text, why not
-* sizing stuff
-    * set width of help view everywhere
-    * pass through set size everywhere, need to call on lists as well
-    * we probably want to use style.Width to wrap text? how? maybe directly in view methods, but need only apply to content that might be too long e.g. not titles?
-        * we don't need to support terminals that are 2x4 in size, don't worry about stuff like that
+    * KEEP IT SIMPLE and get it finished
+* starndardize text and keys, add a bit of meme text, why not
+* make logging default to log.txt, maybe add a separate flag to disable logging
 * error pages
     * instead of showing detailed errors can also just give the bare minimum and refer to logs, that is probably easier because usually things shouldn't go wrong
         * especially when commands go wrong -> think about it again
     * make that "ups, something went wrong"
-    * just distribute available space between stdout and stderr equaly if non are empty
-    * create a command error page similar to the ex we have right now
-        * show command that was run and output of stdout and stderr + exit code and error if running it failed
-        * need to put a bit of effort into making it look nice
-            * can we set hieight of view dynamicylla based on content e.g. max 10 lines but if it is smaller we show less
-        * look at viewport example again to add the border and progress indicator and co
-* help
-    * check again if we did this everyhwere
-    * for many we can just have fixed short or full help, because even full help is just like 2 lines
-    * don't need to implement full/short help functions and can just use helpView.ShortHelpView etc.
-    * also need to set width on help -> we can yes? everywhere, every model a SetSize function that does this
-* for dialogs
-    * can also have some functions that combine stuff e.g. a view or render function that takes title, content and keymap and applies common formatting
-    * remove dialog.go
-* for command error page we could instead
-    * show the last lines of output and error streams
-    * and have keys to open the full things in less or more?
-    * that would work well
-    * need to handle all the keys again, but that is fine, shouldn't be too much work
-* zip works but still some todos to make it look nicer and fix the small bugs and things and make code a bit better
-    * better error output, maybe include complete output in a view?
+    * look at viewport example again to add the border and progress indicator and co
+    * alternative for error page would be to open stdout and stderr output in less/more
+* zip error display?
 * think about dir selection again if it is the right workflow or we missed any sanity checks or similar?
-* pretty
-	* did anything change in the lipgloss package?
-    * do we do top level padding/margin or each model gets the full screen?
-    * dir selection from top to bottom
+
+
 * what about testing?
+    * we could e.g. create a GitHubApi interface that defines method to return the commands
+        * we could have that as a field on Model
+        * for testing we can use a mock or similar
+        * this would be useful especially for interactive testing
 * update readme
-    * note that menu.go contains comment on how to add a new component
 * how to do a "progress report"
 	* e.g. if you run a command like an external program that runs some time and u want to emit multiple messages from there?
 		* is there an example for this? or somebody probably asked this before -> google
+
+
+
+
+without TUI
+* we could also add a command that does everything based on the config file automatically, like a script
+* would need to refactor some of the command code, in particular those that run background commands, so that it can be used by 
+    both terminal ui and script
+* but that shouldn't be hard at all
+* just need to think about what we output and log
+    * e.g. do we log everything to a file
+    * what about command outputs like for a git clone command, print this or run in the background and only output if there is an error
+        * yeah only outputting when there is an error is probably the way

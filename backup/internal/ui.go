@@ -167,11 +167,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmd = m.dirSelectModel.Init()
 				case mainMenuItemZip:
 					m.state = stateZip
-					m.zipModel = zip.NewModel(m.config.BackupDir, m.styles)
+					m.zipModel = zip.NewModel(m.config.BackupDir, m.config.Zip, m.styles)
 					cmd = m.zipModel.Init()
 				case mainMenuItemGithub:
 					m.state = stateGithub
-					m.githubModel = github.NewModel(m.config.BackupDir, m.config.Github.Token, m.styles)
+					m.githubModel = github.NewModel(m.config.BackupDir, m.config.Github, m.styles)
 					cmd = m.githubModel.Init()
 				}
 				// will call SetSize on the nested model we just created
@@ -441,10 +441,9 @@ func (d mainMenuItemDelegate) Render(w io.Writer, m list.Model, index int, listI
 }
 
 type config struct {
-	BackupDir string `json:"backupDir"`
-	Github    struct {
-		Token string `json:"token"`
-	} `json:"github"`
+	BackupDir string        `json:"backupDir"`
+	Github    github.Config `json:"github"`
+	Zip       zip.Config    `json:"zip"`
 }
 
 func loadConfig(configFile string) (config, error) {

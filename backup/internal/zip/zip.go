@@ -15,6 +15,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+type Config struct {
+	File string `json:"file"`
+}
+
 type state int
 
 const (
@@ -28,6 +32,7 @@ const (
 type Model struct {
 	state      state
 	backupDir  string
+	config     Config
 	inputError error
 	result     zipResult
 
@@ -39,10 +44,13 @@ type Model struct {
 	styles style.Styles
 }
 
-func NewModel(backupDir string, styles style.Styles) *Model {
+func NewModel(backupDir string, config Config, styles style.Styles) *Model {
 	zt := textinput.New()
 	zt.CharLimit = 250
 	zt.Width = 40
+	if config.File != "" {
+		zt.SetValue(config.File)
+	}
 	zt.Focus()
 
 	help := help.New()
@@ -51,6 +59,7 @@ func NewModel(backupDir string, styles style.Styles) *Model {
 	return &Model{
 		state:      stateInput,
 		backupDir:  backupDir,
+		config:     config,
 		inputError: nil,
 		keyMap:     defaultKeyMap(),
 		textInput:  zt,
@@ -87,7 +96,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			case key.Matches(msg, m.keyMap.inputCancel):
-				cmd = returnFromZip()
+				cmd = done()
 			default:
 				m.textInput, cmd = m.textInput.Update(msg)
 			}
@@ -106,7 +115,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case stateSuccess:
 		if msg, ok := msg.(tea.KeyMsg); ok && key.Matches(msg, m.keyMap.successContinue) {
-			cmd = returnFromZip()
+			cmd = done()
 		}
 	case stateError:
 		if msg, ok := msg.(tea.KeyMsg); ok && key.Matches(msg, m.keyMap.errorContinue) {
@@ -217,7 +226,7 @@ func zipBackupDir(dir string, file string) tea.Cmd {
 
 type Done struct{}
 
-func returnFromZip() tea.Cmd {
+func done() tea.Cmd {
 	return func() tea.Msg {
 		return Done{}
 	}

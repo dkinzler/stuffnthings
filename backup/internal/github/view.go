@@ -9,8 +9,8 @@ import (
 )
 
 func (m *Model) View() string {
-	if m.confirmQuit {
-		return m.viewConfirmQuit()
+	if m.confirmBack {
+		return m.viewConfirmBack()
 	}
 
 	var content string
@@ -34,97 +34,99 @@ func (m *Model) View() string {
 }
 
 func (m *Model) viewNoToken() string {
-	return fmt.Sprintf(
-		"%s\n\n%s\n\n\n",
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
 		m.styles.TitleStyle.Render("GitHub"),
-		// TODO better text
-		m.styles.NormalTextStyle.Render("No token provided."),
+		"",
+		m.styles.NormalTextStyle.Render("No personal access token provided. Update your config file and try again."),
+		"",
 		m.helpView.ShortHelpView(m.keyMap.noTokenKeys()),
 	)
 }
 
-func (m *Model) viewConfirmQuit() string {
-	return fmt.Sprintf(
-		"%s\n\n%s\n\n%s\n",
+func (m *Model) viewConfirmBack() string {
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
 		m.styles.TitleStyle.Render("GitHub"),
-		m.styles.NormalTextStyle.Render("Do you really want to return to the main menu?"),
-		m.helpView.ShortHelpView(m.keyMap.confirmQuitKeys()),
+		"",
+		m.styles.NormalTextStyle.Render("Do you really want to go back to the main menu?"),
+		"",
+		m.helpView.ShortHelpView(m.keyMap.confirmBackKeys()),
 	)
 }
 
 func (m *Model) viewLoadingRepos() string {
-	return fmt.Sprintf(
-		"%s\n\n%s\n",
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
 		m.styles.TitleStyle.Render("GitHub"),
-		m.styles.NormalTextStyle.Render("Loading repos..."),
+		"",
+		fmt.Sprintf(
+			"%s %s",
+			m.styles.NormalTextStyle.UnsetWidth().Render("Loading repos"),
+			m.spinner.View(),
+		),
 	)
 }
 
 func (m *Model) viewLoadingReposeError() string {
-	return fmt.Sprintf(
-		"%s\n\n%s\n\n%s\n\n%s\n",
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
 		m.styles.TitleStyle.Render("GitHub"),
+		"",
 		m.styles.ErrorTextStyle.Render("Ups, loading repos failed."),
 		m.styles.ErrorTextStyle.Render(m.loadingReposError.Error()),
+		"",
 		m.helpView.ShortHelpView(m.keyMap.errorKeys()),
 	)
 }
 
 func (m *Model) viewReposLoaded() string {
-	return fmt.Sprintf(
-		"%s\n\n%s\n\n%s\n\n%s\n",
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
 		m.styles.TitleStyle.Render("GitHub"),
+		"",
 		m.styles.NormalTextStyle.Render("Select repos to backup"),
-		m.reposList.View(),
+		"",
+		m.selectReposList.View(),
+		"",
 		m.helpView.FullHelpView(m.keyMap.reposLoadedKeys()),
 	)
 }
 
-var checkmark = lipgloss.NewStyle().Foreground(lipgloss.Color("#7ef542")).Render("✓")
-var cross = lipgloss.NewStyle().Foreground(lipgloss.Color("#de0d18")).Render("x")
-
-// TODO we could instead use lipgloss.List here? not sure if that would be much different though
 func (m *Model) viewCloningRepos() string {
-	var s string
-	for _, repo := range m.reposToClone {
-		success, ok := m.cloneResult[repo.Id]
-		if !ok {
-			s += fmt.Sprintf("%s  ?\n", repo.FullName)
-		} else if success {
-			s += fmt.Sprintf("%s  %s\n", repo.FullName, checkmark)
-		} else {
-			s += fmt.Sprintf("%s  %s\n", repo.FullName, cross)
-		}
-
-	}
-
-	return fmt.Sprintf(
-		"%s\n\n%s %s\n\n%s\n",
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
 		m.styles.TitleStyle.Render("GitHub"),
-		m.styles.NormalTextStyle.Render("Cloning Repos"),
-		m.spinner.View(),
-		m.styles.NormalTextStyle.Render(s),
+		"",
+		fmt.Sprintf(
+			"%s %s",
+			m.styles.NormalTextStyle.UnsetWidth().Render("Cloning repos"),
+			m.spinner.View(),
+		),
+		"",
+		m.cloneResultList.View(),
+		"",
+		m.helpView.ShortHelpView(m.keyMap.cloningReposKeys()),
 	)
 }
 
+// TODO actually add the log statement to cloneRepo
 func (m *Model) viewReposCloned() string {
-	var s string
-	for _, repo := range m.reposToClone {
-		success, ok := m.cloneResult[repo.Id]
-		if !ok {
-			s += fmt.Sprintf("%s  ?\n", repo.FullName)
-		} else if success {
-			s += fmt.Sprintf("%s  %s\n", repo.FullName, checkmark)
-		} else {
-			s += fmt.Sprintf("%s  %s\n", repo.FullName, cross)
-		}
+	var content string
+	if m.clonesFailed == 0 {
+		content = m.styles.NormalTextStyle.Render("All repos cloned successfully!")
+	} else {
+		content = m.styles.ErrorTextStyle.Render("Some repos could not be cloned, check the logs for more information. Try again?")
 	}
 
-	return fmt.Sprintf(
-		"%s\n\n%s\n\n%s\n\n%s\n",
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
 		m.styles.TitleStyle.Render("GitHub"),
-		m.styles.NormalTextStyle.Render("Repos Cloned!"),
-		m.styles.NormalTextStyle.Render(s),
+		"",
+		content,
+		"",
+		m.cloneResultList.View(),
+		"",
 		m.helpView.ShortHelpView(m.keyMap.reposClonedKeys()),
 	)
 }
@@ -139,7 +141,7 @@ type keyMap struct {
 	Select     key.Binding
 	SelectAll  key.Binding
 	Continue   key.Binding
-	Quit       key.Binding
+	Back       key.Binding
 
 	ErrorRetry  key.Binding
 	ErrorCancel key.Binding
@@ -147,8 +149,8 @@ type keyMap struct {
 	CloneReturn key.Binding
 	CloneRetry  key.Binding
 
-	ConfirmQuit key.Binding
-	CancelQuit  key.Binding
+	ConfirmBack key.Binding
+	CancelBack  key.Binding
 }
 
 // TODO some of these keys are a bit fucked up still, should we be able to return with esc? -> probably need to somehow, but ask for confirmation
@@ -174,6 +176,7 @@ func defaultKeyMap() keyMap {
 			key.WithKeys("l"),
 			key.WithHelp("l", "next page"),
 		),
+		// TODO should this be named toggle select?
 		Select: key.NewBinding(
 			key.WithKeys(" "),
 			key.WithHelp("space", "select"),
@@ -186,9 +189,9 @@ func defaultKeyMap() keyMap {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "continue"),
 		),
-		Quit: key.NewBinding(
+		Back: key.NewBinding(
 			key.WithKeys("esc"),
-			key.WithHelp("esc", "cancel"),
+			key.WithHelp("esc", "back"),
 		),
 		ErrorRetry: key.NewBinding(
 			key.WithKeys("enter"),
@@ -199,19 +202,18 @@ func defaultKeyMap() keyMap {
 			key.WithHelp("esc", "cancel"),
 		),
 		CloneReturn: key.NewBinding(
-			key.WithKeys("esc"),
-			key.WithHelp("esc", "return to main menu"),
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "return"),
 		),
 		CloneRetry: key.NewBinding(
-			key.WithKeys("enter"),
-			// TODO bad text
-			key.WithHelp("enter", "retry failed"),
+			key.WithKeys("r"),
+			key.WithHelp("r", "retry"),
 		),
-		ConfirmQuit: key.NewBinding(
+		ConfirmBack: key.NewBinding(
 			key.WithKeys("enter", "y"),
 			key.WithHelp("enter/y", "yes"),
 		),
-		CancelQuit: key.NewBinding(
+		CancelBack: key.NewBinding(
 			key.WithKeys("esc", "n"),
 			key.WithHelp("esc/n", "no"),
 		),
@@ -242,19 +244,25 @@ func (m keyMap) listKeyMap() list.KeyMap {
 func (m keyMap) reposLoadedKeys() [][]key.Binding {
 	return [][]key.Binding{
 		{m.CursorUp, m.CursorDown, m.PrevPage, m.NextPage},
-		{m.Select, m.SelectAll, m.Continue, m.Quit},
+		{m.Select, m.SelectAll, m.Continue, m.Back},
+	}
+}
+
+func (m keyMap) cloningReposKeys() []key.Binding {
+	return []key.Binding{
+		m.PrevPage, m.NextPage,
 	}
 }
 
 func (m keyMap) reposClonedKeys() []key.Binding {
 	return []key.Binding{
-		m.CloneReturn, m.CloneRetry,
+		m.PrevPage, m.NextPage, m.CloneReturn, m.CloneRetry,
 	}
 }
 
-func (m keyMap) confirmQuitKeys() []key.Binding {
+func (m keyMap) confirmBackKeys() []key.Binding {
 	return []key.Binding{
-		m.CancelQuit, m.ConfirmQuit,
+		m.CancelBack, m.ConfirmBack,
 	}
 }
 

@@ -10,41 +10,43 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-type RepoList struct {
-	repos        []repo
+type selectReposList struct {
+	repos []repo
+
 	list         list.Model
-	listDelegate *itemDelegate
-	keyMap       keyMap
+	listDelegate *selectReposItemDelegate
+
+	keyMap keyMap
 }
 
-func NewList(repos []repo, keyMap keyMap) *RepoList {
+func newSelectReposList(repos []repo, keyMap keyMap) *selectReposList {
 	items := make([]list.Item, len(repos))
 	for i, r := range repos {
 		items[i] = r
 	}
 	// initially select all items
-	reposListDelegate := NewItemDelegate()
+	listDelegate := newSelectReposItemDelegate()
 	for _, repo := range repos {
-		reposListDelegate.Selected[repo.Id] = struct{}{}
+		listDelegate.selected[repo.Id] = struct{}{}
 	}
-	reposList := list.New(items, reposListDelegate, 0, 0)
-	reposList.SetFilteringEnabled(false)
-	reposList.SetShowHelp(false)
-	reposList.DisableQuitKeybindings()
-	reposList.SetShowStatusBar(false)
-	reposList.SetShowPagination(true)
-	reposList.SetShowTitle(false)
-	reposList.KeyMap = keyMap.listKeyMap()
+	list := list.New(items, listDelegate, 0, 0)
+	list.SetFilteringEnabled(false)
+	list.SetShowHelp(false)
+	list.DisableQuitKeybindings()
+	list.SetShowStatusBar(false)
+	list.SetShowPagination(true)
+	list.SetShowTitle(false)
+	list.KeyMap = keyMap.listKeyMap()
 
-	return &RepoList{
+	return &selectReposList{
 		repos:        repos,
-		list:         reposList,
-		listDelegate: reposListDelegate,
+		list:         list,
+		listDelegate: listDelegate,
 		keyMap:       keyMap,
 	}
 }
 
-func (l *RepoList) Update(msg tea.Msg) tea.Cmd {
+func (l *selectReposList) Update(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
@@ -53,21 +55,21 @@ func (l *RepoList) Update(msg tea.Msg) tea.Cmd {
 		case key.Matches(msg, l.keyMap.Select):
 			repo, ok := l.list.SelectedItem().(repo)
 			if ok {
-				_, selected := l.listDelegate.Selected[repo.Id]
+				_, selected := l.listDelegate.selected[repo.Id]
 				if selected {
-					delete(l.listDelegate.Selected, repo.Id)
+					delete(l.listDelegate.selected, repo.Id)
 				} else {
-					l.listDelegate.Selected[repo.Id] = struct{}{}
+					l.listDelegate.selected[repo.Id] = struct{}{}
 				}
 			}
 		case key.Matches(msg, l.keyMap.SelectAll):
-			if len(l.listDelegate.Selected) > 0 {
+			if len(l.listDelegate.selected) > 0 {
 				// unselect all
-				l.listDelegate.Selected = map[int]struct{}{}
+				l.listDelegate.selected = map[int]struct{}{}
 			} else {
 				// select all
 				for _, repo := range l.repos {
-					l.listDelegate.Selected[repo.Id] = struct{}{}
+					l.listDelegate.selected[repo.Id] = struct{}{}
 				}
 			}
 		default:
@@ -79,62 +81,58 @@ func (l *RepoList) Update(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-func (l *RepoList) SetSize(w, h int) {
-	l.list.SetSize(w, h)
+func (l *selectReposList) SetSize(width, height int) {
+	l.list.SetSize(width, height)
 }
 
-func (l *RepoList) View() string {
+func (l *selectReposList) View() string {
 	return l.list.View()
 }
 
-func (l *RepoList) Selected() []repo {
+func (l *selectReposList) Selected() []repo {
 	var selected []repo
 	for _, r := range l.repos {
-		if _, ok := l.listDelegate.Selected[r.Id]; ok {
+		if _, ok := l.listDelegate.selected[r.Id]; ok {
 			selected = append(selected, r)
 		}
 	}
 	return selected
 }
 
-func (r repo) FilterValue() string {
-	return r.Name
-}
-
-type itemDelegate struct {
+type selectReposItemDelegate struct {
 	itemStyle         lipgloss.Style
 	selectedItemStyle lipgloss.Style
 
-	Selected map[int]struct{}
+	selected map[int]struct{}
 }
 
-func NewItemDelegate() *itemDelegate {
-	return &itemDelegate{
+func newSelectReposItemDelegate() *selectReposItemDelegate {
+	return &selectReposItemDelegate{
 		itemStyle:         lipgloss.NewStyle().PaddingLeft(4),
 		selectedItemStyle: lipgloss.NewStyle().PaddingLeft(2).Foreground(lipgloss.Color("170")),
-		Selected:          map[int]struct{}{},
+		selected:          map[int]struct{}{},
 	}
 }
 
-func (d itemDelegate) Height() int {
+func (d selectReposItemDelegate) Height() int {
 	return 1
 }
 
-func (d itemDelegate) Spacing() int {
+func (d selectReposItemDelegate) Spacing() int {
 	return 0
 }
 
-func (d itemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd {
+func (d selectReposItemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd {
 	return nil
 }
 
-func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
+func (d selectReposItemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
 	repo, ok := listItem.(repo)
 	if !ok {
 		return
 	}
 
-	_, selected := d.Selected[repo.Id]
+	_, selected := d.selected[repo.Id]
 
 	var s string
 	if selected {
@@ -149,5 +147,105 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		s = d.itemStyle.Render(s)
 	}
 
+	fmt.Fprintf(w, s)
+}
+
+type cloneResultList struct {
+	repos []repo
+
+	list         list.Model
+	listDelegate *cloneResultItemDelegate
+
+	keyMap keyMap
+}
+
+func newCloneResultList(repos []repo, cloneResult map[int]bool, keyMap keyMap) *cloneResultList {
+	items := make([]list.Item, len(repos))
+	for i, r := range repos {
+		items[i] = r
+	}
+
+	listDelegate := newCloneResultItemDelegate(cloneResult)
+	list := list.New(items, listDelegate, 0, 0)
+	list.SetFilteringEnabled(false)
+	list.SetShowHelp(false)
+	list.DisableQuitKeybindings()
+	list.SetShowStatusBar(false)
+	list.SetShowPagination(true)
+	list.SetShowTitle(false)
+	list.KeyMap = keyMap.listKeyMap()
+	list.KeyMap.CursorUp.SetEnabled(false)
+	list.KeyMap.CursorDown.SetEnabled(false)
+
+	return &cloneResultList{
+		repos: repos,
+
+		list:         list,
+		listDelegate: listDelegate,
+
+		keyMap: keyMap,
+	}
+}
+
+func (l *cloneResultList) Update(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+	l.list, cmd = l.list.Update(msg)
+	return cmd
+}
+
+func (l *cloneResultList) SetSize(width, height int) {
+	l.list.SetSize(width, height)
+}
+
+func (l *cloneResultList) View() string {
+	return l.list.View()
+}
+
+type cloneResultItemDelegate struct {
+	itemStyle lipgloss.Style
+
+	cloneResult map[int]bool
+}
+
+func newCloneResultItemDelegate(cloneResult map[int]bool) *cloneResultItemDelegate {
+	return &cloneResultItemDelegate{
+		itemStyle:   lipgloss.NewStyle().PaddingLeft(4),
+		cloneResult: cloneResult,
+	}
+}
+
+func (d cloneResultItemDelegate) Height() int {
+	return 1
+}
+
+func (d cloneResultItemDelegate) Spacing() int {
+	return 0
+}
+
+func (d cloneResultItemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd {
+	return nil
+}
+
+var checkmark = lipgloss.NewStyle().Foreground(lipgloss.Color("#7ef542")).Render("✓")
+var cross = lipgloss.NewStyle().Foreground(lipgloss.Color("#de0d18")).Render("x")
+
+func (d cloneResultItemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
+	repo, ok := listItem.(repo)
+	if !ok {
+		return
+	}
+
+	var s string
+
+	success, ok := d.cloneResult[repo.Id]
+	if !ok {
+		s = fmt.Sprintf("%s  ?", repo.FullName)
+	} else if success {
+		s = fmt.Sprintf("%s  %s", repo.FullName, checkmark)
+	} else {
+		s = fmt.Sprintf("%s  %s", repo.FullName, cross)
+	}
+
+	s = d.itemStyle.Render(s)
 	fmt.Fprintf(w, s)
 }

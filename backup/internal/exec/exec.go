@@ -99,6 +99,10 @@ func Foreground(cmd []string, fn Callback, opts ...Option) tea.Cmd {
 		errBuffer = &strings.Builder{}
 	}
 	c := newCommand(exec.Command(name, args...), outBuffer, errBuffer)
+	if options.stdin != "" {
+		c.Stdin = strings.NewReader(options.stdin)
+	}
+
 	startTime := time.Now()
 	return tea.Exec(c, func(err error) tea.Msg {
 		if fn == nil {
@@ -111,7 +115,7 @@ func Foreground(cmd []string, fn Callback, opts ...Option) tea.Cmd {
 		if err != nil {
 			result.ExitCode = -1
 			e, ok := err.(*exec.ExitError)
-			if ok {
+			if ok && e != nil {
 				if e.Exited() {
 					result.ExitCode = e.ExitCode()
 				} else {
@@ -176,7 +180,7 @@ func Background(cmd []string, fn Callback, opts ...Option) tea.Cmd {
 		if err != nil {
 			result.ExitCode = -1
 			e, ok := err.(*exec.ExitError)
-			if ok {
+			if ok && e != nil {
 				if e.Exited() {
 					result.ExitCode = e.ExitCode()
 				} else {
@@ -196,14 +200,17 @@ func Background(cmd []string, fn Callback, opts ...Option) tea.Cmd {
 	}
 }
 
-func newCommand(c *exec.Cmd, out, err io.Writer) *command {
+func newCommand(c *exec.Cmd, out, err *strings.Builder) *command {
 	return &command{Cmd: c, out: out, err: err}
 }
 
 type command struct {
 	*exec.Cmd
-	out io.Writer
-	err io.Writer
+	// Note: using type io.Writer here would lead to a bug
+	// because if we put a nil *strings.Builder into a field with interface type
+	// a comparison of that field against nil would yield false
+	out *strings.Builder
+	err *strings.Builder
 }
 
 func (c *command) SetStdin(r io.Reader) {

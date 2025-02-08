@@ -4,15 +4,11 @@ Next steps
     * add a bit of comment for decision decisions
     * KEEP IT SIMPLE and get it finished
 * starndardize text and keys, add a bit of meme text, why not
-* make logging default to log.txt, maybe add a separate flag to disable logging
-* error pages
-    * instead of showing detailed errors can also just give the bare minimum and refer to logs, that is probably easier because usually things shouldn't go wrong
-        * especially when commands go wrong -> think about it again
-    * make that "ups, something went wrong"
-    * look at viewport example again to add the border and progress indicator and co
-    * alternative for error page would be to open stdout and stderr output in less/more
-* zip error display?
+    * see also the todo in github/view.go
 * think about dir selection again if it is the right workflow or we missed any sanity checks or similar?
+* logging
+    * make logging default to log.txt, maybe add a separate flag to disable logging
+    * add logs for all kinds of stuff
 
 
 * what about testing?
@@ -34,6 +30,12 @@ without TUI
     both terminal ui and script
 * but that shouldn't be hard at all
 * just need to think about what we output and log
+    * just output on console, including external commands?
     * e.g. do we log everything to a file
     * what about command outputs like for a git clone command, print this or run in the background and only output if there is an error
         * yeah only outputting when there is an error is probably the way
+* we could also do this with bubbletea but less fancy?
+    * it is probably easiest to just do a script for now
+    * how would the work flow even work, with the above we would probably have a single entrypoint function that calls out to others and runs commands and so on
+        * because we have a model and program flow is driven 
+* or is there another library more for that purpose?

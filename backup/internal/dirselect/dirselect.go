@@ -19,6 +19,7 @@ type state int
 const (
 	stateInput state = iota
 	stateWarning
+	stateDone
 )
 
 type Model struct {
@@ -84,13 +85,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.newBackupDir = absPath
 				} else {
 					m.newBackupDir = absPath
-					// TODO is it possible that this command gets run async and that in the meantime the user can press enter again and cause the same thing again?
-					// wouldn't really be a big problem but still
-					// to avoid this we could use a separate finished state that we switch into here that just does nothing with a msg
-					// of course how likely is that on a modern machine to happen? can you even press that quickly?
+					// why the extra done state?
+					// another key message might get here before the done command is processed
+					// e.g. if the user spams the enter key
+					// whether or not that is actually possible depends on the implementation of the event loop of bubbletea, I didn't check
+					m.state = stateDone
 					cmd = done(m.newBackupDir)
 				}
 			case key.Matches(msg, m.keyMap.cancel):
+				m.state = stateDone
 				cmd = done("")
 			default:
 				m.textInput, cmd = m.textInput.Update(msg)

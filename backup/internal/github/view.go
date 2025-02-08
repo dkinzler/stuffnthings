@@ -110,7 +110,6 @@ func (m *Model) viewCloningRepos() string {
 	)
 }
 
-// TODO actually add the log statement to cloneRepo
 func (m *Model) viewReposCloned() string {
 	var content string
 	if m.clonesFailed == 0 {
@@ -176,10 +175,9 @@ func defaultKeyMap() keyMap {
 			key.WithKeys("l"),
 			key.WithHelp("l", "next page"),
 		),
-		// TODO should this be named toggle select?
 		Select: key.NewBinding(
 			key.WithKeys(" "),
-			key.WithHelp("space", "select"),
+			key.WithHelp("space", "(un)select"),
 		),
 		SelectAll: key.NewBinding(
 			key.WithKeys("a"),

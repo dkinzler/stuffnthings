@@ -2,6 +2,7 @@ package main
 
 import (
 	"backup/internal"
+	"io"
 
 	"log"
 	"os"
@@ -47,10 +48,10 @@ func run(logFile, configFile string) error {
 			return err
 		}
 		defer f.Close()
+	} else {
+		// by default log writes to stdout and would interfere with our TUI
+		log.SetOutput(io.Discard)
 	}
-	// TODO what happens otherwise, log will print to screen and fuck up our things? in that case should we set log to log nowhere
-	// TODO we should probably add some log messages throughout for debugging? why not
-	// can we set log levels wit log package?
 
 	p := tea.NewProgram(internal.NewModel(configFile), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {

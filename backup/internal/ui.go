@@ -228,8 +228,6 @@ func (m *model) SetSize(width, height int) {
 	mainMenuHeight := innerHeight - 5
 	// if there is a lot of vertical space we don't want the list to fill it all
 	// otherwise most of it will be empty and key help will be all the way at the bottom
-	// TODO can we achieve this otherwise, that list will not use all the space? -> we could truncate the output
-	// from Render()? that way we would mostly get the right results? think about itagain
 	if mainMenuHeight > len(mainMenuItems)*3 {
 		mainMenuHeight = len(mainMenuItems) * 3
 	}

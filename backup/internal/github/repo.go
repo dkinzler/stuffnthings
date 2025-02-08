@@ -4,10 +4,8 @@ import (
 	"backup/internal/exec"
 	"backup/internal/fs"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
-	"math/rand"
 	"net/http"
 	"net/url"
 	"strings"
@@ -15,8 +13,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 )
-
-// TODO add log messages to this
 
 type repo struct {
 	Id       int    `json:"id"`
@@ -45,7 +41,7 @@ func loadRepos(token string) tea.Cmd {
 
 		var repos []repo
 
-		// for further requests we will get the complete url including query parameters from the last response header
+		// we will get the complete url including query parameters for the next page from the last response header
 		initialUrl, err := url.Parse("https://api.github.com/user/repos")
 		if err != nil {
 			log.Println("could not parse url:", err)
@@ -60,7 +56,6 @@ func loadRepos(token string) tea.Cmd {
 		currentUrl := initialUrl.String()
 
 		for currentUrl != "" {
-			log.Println("running loop")
 			req, err := http.NewRequest("GET", currentUrl, nil)
 			if err != nil {
 				return loadReposResult{err: err}
@@ -77,7 +72,6 @@ func loadRepos(token string) tea.Cmd {
 
 			repos = append(repos, r...)
 			currentUrl = nextUrl
-			log.Println(currentUrl)
 		}
 
 		return loadReposResult{repos: repos}
@@ -104,9 +98,9 @@ func doRequest(client *http.Client, req *http.Request) ([]repo, error, string) {
 
 	var nextUrl string
 	if link := resp.Header.Get("link"); link != "" {
-		// TODO there is probably some way to do this more elegantly
-		// TODO better comment here
-		// link: <https://api.github.com/user/repos?page=1>; rel="prev", <https://api.github.com/user/repos?page=1>; rel="last", <https://api.github.com/user/repos?page=1>; rel="first"
+		// extract url for next page from link field in response header
+		// example: <https://api.github.com/user/repos?page=1>; rel="prev", <https://api.github.com/user/repos?page=1>; rel="last", <https://api.github.com/user/repos?page=1>; rel="first"
+		// there is probably a more elegant way to do this, but it works for now
 		i := strings.Index(link, "rel=\"next\"")
 		if i != -1 {
 			endIndex := -1
@@ -134,16 +128,6 @@ type cloneRepoResult struct {
 }
 
 func cloneRepo(repo repo, dir string, token string) tea.Cmd {
-	// TODO remove this
-	// return func() tea.Msg {
-	// 	time.Sleep(time.Second * time.Duration(rand.Int63n(10)+2))
-	// 	if repo.Id%2 == 0 {
-	// 		return cloneRepoResult{id: repo.Id, err: nil}
-	// 	} else {
-	// 		return cloneRepoResult{id: repo.Id, err: errors.New("something went wrong")}
-	// 	}
-	// }
-
 	// another approach would be to pass username/token in the url instead of via stdin e.g. https://username:token@example.com
 	// these commands should not get logged in your shell history
 	cmd := []string{"git", "clone", repo.CloneUrl, fs.JoinPath(dir, repo.Name)}
@@ -158,8 +142,7 @@ func cloneRepo(repo repo, dir string, token string) tea.Cmd {
 			if r.Err != nil {
 				return cloneRepoResult{id: repo.Id, err: r.Err}
 			} else {
-				// TODO this is not good, what about stderr and stdout, does git write to stderr?
-				return cloneRepoResult{id: repo.Id, err: errors.New("something went wrong")}
+				return cloneRepoResult{id: repo.Id, err: fmt.Errorf("git clone failed with exit code %v", r.ExitCode)}
 			}
 		}
 	}, opts...)

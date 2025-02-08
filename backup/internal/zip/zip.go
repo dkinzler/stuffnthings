@@ -38,10 +38,14 @@ type Model struct {
 
 	keyMap keyMap
 
-	textInput textinput.Model
-	help      help.Model
+	textInput  textinput.Model
+	errorModel *exec.ErrorModel
+	help       help.Model
 
 	styles style.Styles
+
+	width  int
+	height int
 }
 
 func NewModel(backupDir string, config Config, styles style.Styles) *Model {
@@ -63,6 +67,7 @@ func NewModel(backupDir string, config Config, styles style.Styles) *Model {
 		inputError: nil,
 		keyMap:     defaultKeyMap(),
 		textInput:  zt,
+		errorModel: nil,
 		help:       help,
 		styles:     styles,
 	}
@@ -110,6 +115,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = stateSuccess
 			} else {
 				m.state = stateError
+				m.errorModel = exec.NewErrorModel(msg.result, m.styles)
+				m.errorModel.SetSize(m.width, m.height)
 			}
 			m.result = msg
 		}
@@ -118,8 +125,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = done()
 		}
 	case stateError:
-		if msg, ok := msg.(tea.KeyMsg); ok && key.Matches(msg, m.keyMap.errorContinue) {
+		switch msg := msg.(type) {
+		case exec.Done:
 			m.state = stateInput
+			m.errorModel = nil
+		default:
+			cmd = m.errorModel.Update(msg)
 		}
 	}
 
@@ -127,7 +138,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) SetSize(width, height int) {
+	m.width = width
+	m.height = height
 	m.help.Width = width
+	if m.errorModel != nil {
+		m.errorModel.SetSize(width, height)
+	}
 }
 
 func (m *Model) View() string {
@@ -166,19 +182,7 @@ func (m *Model) View() string {
 			m.help.ShortHelpView(m.keyMap.successKeys()),
 		)
 	case stateError:
-		// TODO do error page
-		var errText string
-		if m.result.result.Err != nil {
-			errText = m.result.result.Err.Error()
-		} else {
-			errText = m.result.result.Stdout
-		}
-		content = fmt.Sprintf(
-			"%s\n\n%s\n\n%s\n",
-			styles.TitleStyle.Render("Error"),
-			styles.NormalTextStyle.Render(errText),
-			m.help.ShortHelpView(m.keyMap.errorKeys()),
-		)
+		content = m.errorModel.View()
 	}
 
 	return content

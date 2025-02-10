@@ -12,6 +12,7 @@ import (
 )
 
 type Config struct {
+	// personal access token to authenticate API requests
 	Token string `json:"token"`
 }
 
@@ -31,8 +32,7 @@ type Model struct {
 	confirmBack bool
 
 	backupDir string
-	// personal access token to authenticate API requests
-	config Config
+	config    Config
 
 	repos             []repo
 	loadingReposError error
@@ -148,7 +148,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch {
-			case key.Matches(msg, m.keyMap.ErrorRetry):
+			case key.Matches(msg, m.keyMap.ErrorBack):
 				m.state = stateLoadingRepos
 				m.repos = nil
 				m.loadingReposError = nil

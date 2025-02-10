@@ -11,16 +11,27 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+type args struct {
+	log        string
+	disableLog bool
+	config     string
+}
+
 func main() {
 	app := &cli.App{
 		Name:  "backup",
-		Usage: "",
+		Usage: "backup your stuff",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "log",
 				Aliases: []string{"l"},
-				Value:   "",
+				Value:   "log.txt",
 				Usage:   "log to file",
+			},
+			&cli.BoolFlag{
+				Name:  "disableLog",
+				Value: false,
+				Usage: "disable logging",
 			},
 			&cli.StringFlag{
 				Name:    "config",
@@ -30,9 +41,12 @@ func main() {
 			},
 		},
 		Action: func(cCtx *cli.Context) error {
-			logFile := cCtx.String("log")
-			configFile := cCtx.String("config")
-			return run(logFile, configFile)
+			args := args{
+				log:        cCtx.String("log"),
+				disableLog: cCtx.Bool("disableLog"),
+				config:     cCtx.String("config"),
+			}
+			return run(args)
 		},
 	}
 
@@ -41,19 +55,20 @@ func main() {
 	}
 }
 
-func run(logFile, configFile string) error {
-	if logFile != "" {
-		f, err := tea.LogToFile(logFile, "log")
+// Note: the log package is safe to use with multiple goroutines, fmt is not and might produce mixed output.
+func run(args args) error {
+	if args.disableLog {
+		// by default log writes to stdout and would interfere with our TUI
+		log.SetOutput(io.Discard)
+	} else {
+		f, err := tea.LogToFile(args.log, "")
 		if err != nil {
 			return err
 		}
 		defer f.Close()
-	} else {
-		// by default log writes to stdout and would interfere with our TUI
-		log.SetOutput(io.Discard)
 	}
 
-	p := tea.NewProgram(internal.NewModel(configFile), tea.WithAltScreen())
+	p := tea.NewProgram(internal.NewModel(args.config), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		return err
 	}

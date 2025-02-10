@@ -23,6 +23,7 @@ type state int
 
 const (
 	stateInput state = iota
+	// why a separate state and not just stay in stateInput until zip is done?
 	// otherwise it might be possible to e.g. start multiple zip commands by spamming the enter key
 	stateZipping
 	stateSuccess
@@ -100,7 +101,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						cmd = zipBackupDir(m.backupDir, absFile)
 					}
 				}
-			case key.Matches(msg, m.keyMap.inputCancel):
+			case key.Matches(msg, m.keyMap.inputBack):
 				cmd = done()
 			default:
 				m.textInput, cmd = m.textInput.Update(msg)
@@ -238,11 +239,9 @@ func done() tea.Cmd {
 
 type keyMap struct {
 	inputConfirm key.Binding
-	inputCancel  key.Binding
+	inputBack    key.Binding
 
 	successContinue key.Binding
-
-	errorContinue key.Binding
 }
 
 func defaultKeyMap() keyMap {
@@ -251,15 +250,11 @@ func defaultKeyMap() keyMap {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "confirm"),
 		),
-		inputCancel: key.NewBinding(
+		inputBack: key.NewBinding(
 			key.WithKeys("esc"),
-			key.WithHelp("esc", "cancel"),
+			key.WithHelp("esc", "back"),
 		),
 		successContinue: key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "continue"),
-		),
-		errorContinue: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "continue"),
 		),
@@ -267,13 +262,9 @@ func defaultKeyMap() keyMap {
 }
 
 func (m keyMap) inputKeys() []key.Binding {
-	return []key.Binding{m.inputCancel, m.inputConfirm}
+	return []key.Binding{m.inputBack, m.inputConfirm}
 }
 
 func (m keyMap) successKeys() []key.Binding {
 	return []key.Binding{m.successContinue}
-}
-
-func (m keyMap) errorKeys() []key.Binding {
-	return []key.Binding{m.errorContinue}
 }

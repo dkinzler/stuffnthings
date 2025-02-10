@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -67,6 +68,7 @@ func NewModel(configFile string) *model {
 
 	config, configErr := loadConfig(configFile)
 	if configErr != nil {
+		log.Println("error loading config:", configErr)
 		initialState = stateConfigError
 	}
 
@@ -326,12 +328,12 @@ func defaultKeyMap() keyMap {
 			key.WithHelp("q/ctrl+c", "quit"),
 		),
 		ConfirmQuit: key.NewBinding(
-			key.WithKeys("enter", "y"),
-			key.WithHelp("enter/y", "yes"),
+			key.WithKeys("y"),
+			key.WithHelp("y", "yes"),
 		),
 		CancelQuit: key.NewBinding(
-			key.WithKeys("esc", "n"),
-			key.WithHelp("esc/n", "no"),
+			key.WithKeys("n"),
+			key.WithHelp("n", "no"),
 		),
 		ConfigErrorContinue: key.NewBinding(
 			key.WithKeys("enter"),

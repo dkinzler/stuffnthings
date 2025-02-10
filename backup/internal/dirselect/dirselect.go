@@ -92,7 +92,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.state = stateDone
 					cmd = done(m.newBackupDir)
 				}
-			case key.Matches(msg, m.keyMap.cancel):
+			case key.Matches(msg, m.keyMap.back):
 				m.state = stateDone
 				cmd = done("")
 			default:
@@ -181,7 +181,7 @@ func (m *Model) View() string {
 		if m.warning == warningDirNotEmpty {
 			warningText = "Directory is not empty, if you continue files may be overwritten."
 		} else if m.warning == warningParentNotExists {
-			warningText = "Parent directory does not exist, intended or typo?"
+			warningText = "Parent directory does not exist, might be a typo."
 		}
 		content = lipgloss.JoinVertical(
 			lipgloss.Left,
@@ -210,7 +210,7 @@ func done(backupDir string) tea.Cmd {
 
 type keyMap struct {
 	confirm key.Binding
-	cancel  key.Binding
+	back    key.Binding
 
 	warningConfirm key.Binding
 	warningCancel  key.Binding
@@ -222,23 +222,23 @@ func defaultKeyMap() keyMap {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "confirm"),
 		),
-		cancel: key.NewBinding(
+		back: key.NewBinding(
 			key.WithKeys("esc"),
-			key.WithHelp("esc", "cancel"),
+			key.WithHelp("esc", "back"),
 		),
 		warningConfirm: key.NewBinding(
-			key.WithKeys("enter", "y"),
-			key.WithHelp("enter/y", "yes"),
+			key.WithKeys("y"),
+			key.WithHelp("y", "yes"),
 		),
 		warningCancel: key.NewBinding(
-			key.WithKeys("esc", "n"),
-			key.WithHelp("esc/n", "no"),
+			key.WithKeys("n"),
+			key.WithHelp("n", "no"),
 		),
 	}
 }
 
 func (m keyMap) inputKeys() []key.Binding {
-	return []key.Binding{m.cancel, m.confirm}
+	return []key.Binding{m.back, m.confirm}
 }
 
 func (m keyMap) warningKeys() []key.Binding {

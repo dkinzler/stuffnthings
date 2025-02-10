@@ -21,7 +21,7 @@ func (m *Model) View() string {
 	case stateLoadingRepos:
 		content = m.viewLoadingRepos()
 	case stateLoadingReposError:
-		content = m.viewLoadingReposeError()
+		content = m.viewLoadingReposError()
 	case stateReposLoaded:
 		content = m.viewReposLoaded()
 	case stateCloningRepos:
@@ -68,13 +68,13 @@ func (m *Model) viewLoadingRepos() string {
 	)
 }
 
-func (m *Model) viewLoadingReposeError() string {
+func (m *Model) viewLoadingReposError() string {
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		m.styles.TitleStyle.Render("GitHub"),
 		"",
 		m.styles.ErrorTextStyle.Render("Ups, loading repos failed."),
-		m.styles.ErrorTextStyle.Render(m.loadingReposError.Error()),
+		m.styles.ErrorTextStyle.Render(fmt.Sprintf("error: %s", m.loadingReposError.Error())),
 		"",
 		m.helpView.ShortHelpView(m.keyMap.errorKeys()),
 	)
@@ -142,8 +142,8 @@ type keyMap struct {
 	Continue   key.Binding
 	Back       key.Binding
 
-	ErrorRetry  key.Binding
-	ErrorCancel key.Binding
+	ErrorRetry key.Binding
+	ErrorBack  key.Binding
 
 	CloneReturn key.Binding
 	CloneRetry  key.Binding
@@ -152,7 +152,6 @@ type keyMap struct {
 	CancelBack  key.Binding
 }
 
-// TODO some of these keys are a bit fucked up still, should we be able to return with esc? -> probably need to somehow, but ask for confirmation
 func defaultKeyMap() keyMap {
 	return keyMap{
 		NoTokenReturn: key.NewBinding(
@@ -195,9 +194,9 @@ func defaultKeyMap() keyMap {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "retry"),
 		),
-		ErrorCancel: key.NewBinding(
+		ErrorBack: key.NewBinding(
 			key.WithKeys("esc"),
-			key.WithHelp("esc", "cancel"),
+			key.WithHelp("esc", "back"),
 		),
 		CloneReturn: key.NewBinding(
 			key.WithKeys("enter"),
@@ -208,18 +207,18 @@ func defaultKeyMap() keyMap {
 			key.WithHelp("r", "retry"),
 		),
 		ConfirmBack: key.NewBinding(
-			key.WithKeys("enter", "y"),
-			key.WithHelp("enter/y", "yes"),
+			key.WithKeys("y"),
+			key.WithHelp("y", "yes"),
 		),
 		CancelBack: key.NewBinding(
-			key.WithKeys("esc", "n"),
-			key.WithHelp("esc/n", "no"),
+			key.WithKeys("n"),
+			key.WithHelp("n", "no"),
 		),
 	}
 }
 
 func (m keyMap) errorKeys() []key.Binding {
-	return []key.Binding{m.ErrorCancel, m.ErrorRetry}
+	return []key.Binding{m.ErrorBack, m.ErrorRetry}
 }
 
 func (m keyMap) listKeyMap() list.KeyMap {

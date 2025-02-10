@@ -1,22 +1,10 @@
-Next steps
-* generally
-    * design for the default case of how you will use it
-    * add a bit of comment for decision decisions
-    * KEEP IT SIMPLE and get it finished
-* starndardize text and keys, add a bit of meme text, why not
-    * see also the todo in github/view.go
-* think about dir selection again if it is the right workflow or we missed any sanity checks or similar?
-* logging
-    * make logging default to log.txt, maybe add a separate flag to disable logging
-    * add logs for all kinds of stuff
-
-
 * what about testing?
     * we could e.g. create a GitHubApi interface that defines method to return the commands
         * we could have that as a field on Model
         * for testing we can use a mock or similar
         * this would be useful especially for interactive testing
 * update readme
+    * note there is still some polishing to do, but works well enough
 * how to do a "progress report"
 	* e.g. if you run a command like an external program that runs some time and u want to emit multiple messages from there?
 		* is there an example for this? or somebody probably asked this before -> google
@@ -39,3 +27,19 @@ without TUI
     * how would the work flow even work, with the above we would probably have a single entrypoint function that calls out to others and runs commands and so on
         * because we have a model and program flow is driven 
 * or is there another library more for that purpose?
+
+how would we do that?
+* move ui.go into ui package and current backup command into backupui and script one just into backup
+* need code reuse
+    * where things happen we need to split the action part from the command part, zipping, git clone etc.
+        * also applies to exec.Background
+        * that should be easy enough
+        * and need to export these functions
+    * we can use the same config structs
+    * we basically just have a single file that does cli parsing and then runs a single function, the main one
+        * that first checks config, if everything is there
+        * then runs every module one by one, for each one a function
+        * output everything to std
+        * do we need prompts? yes e.g. to retry failed cloned operations
+* we can maybe use some of the styling from lipgloss?
+

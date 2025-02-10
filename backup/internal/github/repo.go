@@ -140,8 +140,10 @@ func cloneRepo(repo repo, dir string, token string) tea.Cmd {
 			return cloneRepoResult{id: repo.Id, err: nil}
 		} else {
 			if r.Err != nil {
+				log.Println("error executing git clone:", r.Err)
 				return cloneRepoResult{id: repo.Id, err: r.Err}
 			} else {
+				log.Printf("git clone failed, exit code: %v\nstdout: %s\nstderr: %s", r.ExitCode, r.Stdout, r.Stderr)
 				return cloneRepoResult{id: repo.Id, err: fmt.Errorf("git clone failed with exit code %v", r.ExitCode)}
 			}
 		}

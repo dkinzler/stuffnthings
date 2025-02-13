@@ -16,7 +16,7 @@ backup --config config.json tui
 
 ### Configuration Example
 
-For all options see `internal/config/config.go`.
+For all options see [](internal/config/config.go).
 
 ```json
 {

@@ -1,16 +1,14 @@
-package internal
+package ui
 
 import (
+	"backup/internal/config"
 	"backup/internal/dirselect"
-	"backup/internal/fs"
 	"backup/internal/github"
 	"backup/internal/style"
 	"backup/internal/zip"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
-	"os"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -40,7 +38,7 @@ const (
 )
 
 type model struct {
-	config config
+	config config.Config
 
 	state state
 	// if true a dialog to confirm quit will be shown
@@ -66,7 +64,7 @@ type model struct {
 func NewModel(configFile string) *model {
 	initialState := stateMainMenu
 
-	config, configErr := loadConfig(configFile)
+	config, configErr := config.LoadConfig(configFile)
 	if configErr != nil {
 		log.Println("error loading config:", configErr)
 		initialState = stateConfigError
@@ -438,42 +436,4 @@ func (d mainMenuItemDelegate) Render(w io.Writer, m list.Model, index int, listI
 	}
 
 	fmt.Fprintf(w, s)
-}
-
-type config struct {
-	BackupDir string        `json:"backupDir"`
-	Github    github.Config `json:"github"`
-	Zip       zip.Config    `json:"zip"`
-}
-
-func loadConfig(configFile string) (config, error) {
-	var config config
-
-	if configFile != "" {
-		s, err := os.ReadFile(configFile)
-		if err != nil {
-			return config, fmt.Errorf("could not read file: %w", err)
-		}
-		err = json.Unmarshal(s, &config)
-		if err != nil {
-			return config, fmt.Errorf("could not decode json: %w", err)
-		}
-	}
-
-	// validate and set defaults
-	if config.BackupDir == "" {
-		backupDir, err := fs.DefaultBackupDir()
-		if err != nil {
-			return config, fmt.Errorf("could not get default backup directory: %w", err)
-		}
-		config.BackupDir = backupDir
-	} else {
-		absPath, err := fs.AbsPath(config.BackupDir)
-		if err != nil {
-			return config, fmt.Errorf("invalid directory: %w", err)
-		}
-		config.BackupDir = absPath
-	}
-
-	return config, nil
 }

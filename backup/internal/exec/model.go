@@ -54,7 +54,7 @@ func (m *ErrorModel) Update(msg tea.Msg) tea.Cmd {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, m.keyMap.ShowStdout):
-			cmd = Foreground(
+			cmd = ForegroundCmd(
 				[]string{"less"},
 				func(r Result) tea.Msg {
 					return nil
@@ -64,7 +64,7 @@ func (m *ErrorModel) Update(msg tea.Msg) tea.Cmd {
 				WithStdin(m.result.Stdout),
 			)
 		case key.Matches(msg, m.keyMap.ShowStderr):
-			cmd = Foreground(
+			cmd = ForegroundCmd(
 				[]string{"less"},
 				func(r Result) tea.Msg {
 					return nil

@@ -1,5 +1,31 @@
-A CLI tool to backup your GitHub repositories, built with Go and `bubbletea`.
+A CLI tool to backup your stuff.
 
-### TODO
+## Usage
 
-For testing there is the experimental charmbracelet/x/teatest package.
+Run as an automated script:
+
+```shell
+backup --config config.json
+```
+
+Use terminal user interface:
+
+```shell
+backup --config config.json tui
+```
+
+### Configuration Example
+
+For all options see `internal/config/config.go`.
+
+```json
+{
+    "backupDir": "~/backup",
+    "github": {
+        "token": "your-personal-access-token-here"
+    },
+    "zip": {
+        "file": "~/backup.zip"
+    }
+}
+```

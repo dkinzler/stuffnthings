@@ -11,7 +11,7 @@ import (
 )
 
 type selectReposList struct {
-	repos []repo
+	repos []Repo
 
 	list         list.Model
 	listDelegate *selectReposItemDelegate
@@ -19,7 +19,7 @@ type selectReposList struct {
 	keyMap keyMap
 }
 
-func newSelectReposList(repos []repo, keyMap keyMap) *selectReposList {
+func newSelectReposList(repos []Repo, keyMap keyMap) *selectReposList {
 	items := make([]list.Item, len(repos))
 	for i, r := range repos {
 		items[i] = r
@@ -53,7 +53,7 @@ func (l *selectReposList) Update(msg tea.Msg) tea.Cmd {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, l.keyMap.Select):
-			repo, ok := l.list.SelectedItem().(repo)
+			repo, ok := l.list.SelectedItem().(Repo)
 			if ok {
 				_, selected := l.listDelegate.selected[repo.Id]
 				if selected {
@@ -89,8 +89,8 @@ func (l *selectReposList) View() string {
 	return l.list.View()
 }
 
-func (l *selectReposList) Selected() []repo {
-	var selected []repo
+func (l *selectReposList) Selected() []Repo {
+	var selected []Repo
 	for _, r := range l.repos {
 		if _, ok := l.listDelegate.selected[r.Id]; ok {
 			selected = append(selected, r)
@@ -127,7 +127,7 @@ func (d selectReposItemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd {
 }
 
 func (d selectReposItemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
-	repo, ok := listItem.(repo)
+	repo, ok := listItem.(Repo)
 	if !ok {
 		return
 	}
@@ -151,7 +151,7 @@ func (d selectReposItemDelegate) Render(w io.Writer, m list.Model, index int, li
 }
 
 type cloneResultList struct {
-	repos []repo
+	repos []Repo
 
 	list         list.Model
 	listDelegate *cloneResultItemDelegate
@@ -159,7 +159,7 @@ type cloneResultList struct {
 	keyMap keyMap
 }
 
-func newCloneResultList(repos []repo, cloneResult map[int]bool, keyMap keyMap) *cloneResultList {
+func newCloneResultList(repos []Repo, cloneResult map[int]bool, keyMap keyMap) *cloneResultList {
 	items := make([]list.Item, len(repos))
 	for i, r := range repos {
 		items[i] = r
@@ -230,7 +230,7 @@ var checkmark = lipgloss.NewStyle().Foreground(lipgloss.Color("#7ef542")).Render
 var cross = lipgloss.NewStyle().Foreground(lipgloss.Color("#de0d18")).Render("x")
 
 func (d cloneResultItemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
-	repo, ok := listItem.(repo)
+	repo, ok := listItem.(Repo)
 	if !ok {
 		return
 	}

@@ -178,7 +178,7 @@ func (m *Model) View() string {
 			styles.TitleStyle.Render("Success"),
 			"",
 			styles.NormalTextStyle.Render(fmt.Sprintf("Zipped %s in %s", m.result.file, duration)),
-			styles.NormalTextStyle.Render(fmt.Sprintf("File size %s", fileSizeString(m.result.size))),
+			styles.NormalTextStyle.Render(fmt.Sprintf("Size %s", fileSizeString(m.result.size))),
 			"",
 			m.help.ShortHelpView(m.keyMap.successKeys()),
 		)
@@ -213,7 +213,7 @@ func zipBackupDir(dir string, file string) tea.Cmd {
 	// e.g. when you unzip you will get home/username/backup/somefile instead of just backup/somefile
 	// sh starts a new shell, so we do not have to worry about changing directory back
 	cmd := []string{"sh", "-c", fmt.Sprintf("cd %s && zip -r %s %s", parent, file, base)}
-	return exec.Foreground(cmd, func(er exec.Result) tea.Msg {
+	return exec.ForegroundCmd(cmd, func(er exec.Result) tea.Msg {
 		result := zipResult{
 			result: er,
 			file:   file,

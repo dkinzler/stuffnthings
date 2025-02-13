@@ -34,10 +34,10 @@ type Model struct {
 	backupDir string
 	config    Config
 
-	repos             []repo
+	repos             []Repo
 	loadingReposError error
 
-	reposToClone []repo
+	reposToClone []Repo
 	cloneResult  map[int]bool
 	clonesFailed int
 
@@ -92,7 +92,7 @@ func (m *Model) Init() tea.Cmd {
 	if m.state == stateNoToken {
 		return nil
 	}
-	return tea.Batch(loadRepos(m.config.Token), m.spinner.Tick)
+	return tea.Batch(loadReposCmd(m.config.Token), m.spinner.Tick)
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -152,7 +152,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = stateLoadingRepos
 				m.repos = nil
 				m.loadingReposError = nil
-				cmd = loadRepos(m.config.Token)
+				cmd = loadReposCmd(m.config.Token)
 			}
 		}
 
@@ -169,12 +169,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.reposToClone = reposToClone
 					m.cloneResult = map[int]bool{}
 					m.clonesFailed = 0
-					m.cloneResultList = newCloneResultList(m.repos, m.cloneResult, m.keyMap)
+					m.cloneResultList = newCloneResultList(m.reposToClone, m.cloneResult, m.keyMap)
 					m.setListSize()
 					m.validationError = nil
 					var cmds []tea.Cmd
 					for _, r := range m.reposToClone {
-						cmds = append(cmds, cloneRepo(r, m.backupDir, m.config.Token))
+						cmds = append(cmds, cloneRepoCmd(r, m.backupDir, m.config.Token))
 					}
 					cmds = append(cmds, m.spinner.Tick)
 					cmd = tea.Batch(cmds...)
@@ -219,7 +219,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					for _, r := range m.reposToClone {
 						if success, ok := m.cloneResult[r.Id]; ok && !success {
 							delete(m.cloneResult, r.Id)
-							cmds = append(cmds, cloneRepo(r, m.backupDir, m.config.Token))
+							cmds = append(cmds, cloneRepoCmd(r, m.backupDir, m.config.Token))
 						}
 					}
 					cmd = tea.Batch(cmds...)

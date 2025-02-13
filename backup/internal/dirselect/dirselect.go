@@ -179,7 +179,7 @@ func (m *Model) View() string {
 	case stateWarning:
 		var warningText string
 		if m.warning == warningDirNotEmpty {
-			warningText = "Directory is not empty, if you continue files may be overwritten."
+			warningText = "Directory is not empty, if you continue files might get overwritten."
 		} else if m.warning == warningParentNotExists {
 			warningText = "Parent directory does not exist, might be a typo."
 		}

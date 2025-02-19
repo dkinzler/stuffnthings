@@ -25,6 +25,8 @@ func Backup(configFile string) {
 
 	backupGithub(backupDir, config.Github)
 
+	backupFiles(backupDir, config.Files)
+
 	zipDir(backupDir, config.Zip)
 }
 
@@ -171,6 +173,77 @@ func confirmPrompt(text string) bool {
 
 		out.Println("invalid response")
 	}
+}
+
+// no retries here, in most cases if it didn't work the first time is likely won't on further attempts
+func backupFiles(backupDir string, paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+
+	out.Println()
+	out.Println("backing up local files")
+
+	backupDir = fs.JoinPath(backupDir, "files")
+
+	for i, path := range paths {
+		out.Printf("copying %s (%v/%v)\n", path, i+1, len(paths))
+		absPath, err := fs.AbsPath(path)
+		if err != nil {
+			out.Println("error: invalid path:", err)
+			continue
+		}
+
+		exists, err := fs.Exists(absPath)
+		if err != nil {
+			out.Println("error:", err)
+			continue
+		}
+
+		if !exists {
+			out.Println("error: file or directory does not exist")
+			continue
+		}
+
+		if absPath == "/" {
+			out.Println("error: copying / is a bad idea")
+			continue
+		}
+
+		// the full original path will be retained
+		// e.g. /home/user/abc/def will be copied to backupDir/local/home/user/abc/def
+		parentPath := fs.ParentPath(absPath)
+		targetPath := fs.JoinPath(backupDir, parentPath)
+
+		err = fs.CreateDir(targetPath)
+		if err != nil {
+			out.Println("error: could not create target directory:", err)
+			continue
+		}
+
+		target := fs.JoinPath(backupDir, absPath)
+		result := copyFiles(absPath, target)
+		if result.Err != nil {
+			out.Println("error: could not copy files:", result.Err)
+		} else if result.ExitCode != 0 {
+			out.Println("error: cp exited with code", result.ExitCode)
+			if len(result.Stdout) > 0 {
+				out.Println("stdout:")
+				out.Println(result.Stdout)
+			}
+			if len(result.Stderr) > 0 {
+				out.Println("stderr:")
+				out.Println(result.Stderr)
+			}
+		}
+	}
+}
+
+func copyFiles(source, target string) exec.Result {
+	return exec.Background(
+		[]string{"cp", "-r", source, target},
+		exec.WithTimeout(0),
+	)
 }
 
 func zipDir(dir string, config zip.Config) {

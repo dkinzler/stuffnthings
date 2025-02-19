@@ -13,6 +13,7 @@ type Config struct {
 	BackupDir string        `json:"backupDir"`
 	Github    github.Config `json:"github"`
 	Zip       zip.Config    `json:"zip"`
+	Files     []string      `json:"files"`
 }
 
 func LoadConfig(file string) (Config, error) {

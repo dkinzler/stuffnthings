@@ -26,6 +26,11 @@ For all options see [internal/config/config.go](internal/config/config.go).
     },
     "zip": {
         "file": "~/backup.zip"
-    }
+    },
+    "files": [
+        "~/.config",
+        "~/Downloads/abc.zip",
+        "/abc/def"
+    ]
 }
 ```
